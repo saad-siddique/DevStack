@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# stack-status : one JSON blob describing the local stack (polled by the future menu-bar app).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+# Valet runs nginx/dnsmasq/php-fpm as root; mysql/mailpit run as the user. Merge both service domains.
+services="$( { sudo -n brew services list --json 2> /dev/null || echo '[]'; brew services list --json 2> /dev/null || echo '[]'; } \
+	| jq -s 'add | map(select(.name | test("^(nginx|dnsmasq|php(@[0-9.]+)?|mysql@8.4|mailpit)$")))
+	         | group_by(.name) | map(max_by(if .status == "started" then 1 else 0 end)) | map({name, status, user})')"
+
+sites="$(for l in "$VALET_HOME"/Sites/*; do
+	[ -L "$l" ] || continue
+	n="$(basename "$l")"; php=default
+	conf="$VALET_HOME/Nginx/$n.$TLD"
+	if [ -f "$conf" ]; then
+		sock="$(grep -oE 'valet[0-9]+\.sock' "$conf" | head -1)"
+		[ -n "$sock" ] && php="$(sed -E 's/valet([0-9])([0-9]+)\.sock/\1.\2/' <<<"$sock")"
+	fi
+	secured=false; [ -f "$VALET_HOME/Certificates/$n.$TLD.crt" ] && secured=true
+	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --arg path "$(readlink "$l")" '{name:$name,php:$php,secured:$secured,path:$path}'
+done | jq -s 'sort_by(.name)')"
+
+ports="$(for p in 80 443 3306 1025 8025; do
+	owner="$(lsof -nP -iTCP:$p -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"
+	jq -n --arg p "$p" --arg o "${owner:-}" '{($p): (if $o == "" then null else $o end)}'
+done | jq -s 'add')"
+
+mysql_json='{"version":null,"qps":null}'
+if st="$("$BREW_PREFIX/opt/mysql@8.4/bin/mysqladmin" -uroot status 2> /dev/null)"; then
+	up="$(sed -E 's/.*Uptime: ([0-9]+).*/\1/' <<<"$st")"; q="$(sed -E 's/.*Questions: ([0-9]+).*/\1/' <<<"$st")"
+	v="$(mysql_new -N -e 'SELECT VERSION()')"
+	mysql_json="$(jq -n --arg v "$v" --argjson qps "$(awk -v q="$q" -v u="$up" 'BEGIN{printf "%.2f", (u>0)?q/u:0}')" '{version:$v,qps:$qps}')"
+fi
+
+# Mail catcher on :8025 — Mailpit (/api/v1) or MAMP's MailHog (served under /mailhog).
+mail_json='{"backend":null,"total":null}'
+if t="$(curl -s -m 1 'http://localhost:8025/api/v1/messages?limit=1' | jq -e '.total' 2> /dev/null)"; then
+	mail_json="$(jq -n --argjson t "$t" '{backend:"mailpit",total:$t}')"
+elif t="$(curl -s -m 1 'http://localhost:8025/mailhog/api/v2/messages?limit=1' | jq -e '.total' 2> /dev/null)"; then
+	mail_json="$(jq -n --argjson t "$t" '{backend:"mailhog",total:$t}')"
+fi
+
+jq -n --argjson services "$services" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" \
+	'{generated_at: (now | todate), services:$services, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail}'
