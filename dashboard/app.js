@@ -5,7 +5,8 @@
 	var SERVICE_ORDER = [ 'nginx', 'dnsmasq', 'mysql@8.4', 'mailpit', 'redis', 'memcached' ];
 	var LABELS = { 'nginx': 'nginx', 'dnsmasq': 'dnsmasq', 'mysql@8.4': 'MySQL 8.4', 'mailpit': 'Mailpit', 'redis': 'Redis', 'memcached': 'Memcached' };
 	var ROLES  = { 'nginx': 'web server', 'dnsmasq': '.test DNS', 'mysql@8.4': 'database', 'mailpit': 'mail catcher', 'redis': 'object cache', 'memcached': 'object cache' };
-	var REFRESH_MS = 5000;
+	var REFRESH_MS = 60000;          // status once a minute; nothing while the tab is hidden. The Refresh button is instant.
+	var lastLoaded = 0;
 	var busy = false;
 	var timer = null;
 	var last = null;
@@ -16,6 +17,21 @@
 	var logData = null;
 
 	var $ = function ( id ) { return document.getElementById( id ); };
+	var TABS = [ 'overview', 'php', 'services', 'logs', 'tools' ];
+	var currentTab = 'overview';
+
+	function setTab( name, push ) {
+		if ( -1 === TABS.indexOf( name ) ) { name = 'overview'; }
+		currentTab = name;
+		document.querySelectorAll( '.nav-item' ).forEach( function ( b ) { b.setAttribute( 'aria-selected', b.getAttribute( 'data-tab' ) === name ? 'true' : 'false' ); } );
+		document.querySelectorAll( '.tab' ).forEach( function ( sec ) { sec.hidden = sec.getAttribute( 'data-tab' ) !== name; } );
+		try { localStorage.setItem( 'devstack.tab', name ); } catch ( e ) {}
+		if ( false !== push && location.hash !== '#' + name ) { history.replaceState( null, '', '#' + name ); }
+		if ( 'logs' === name ) { loadLog(); } else { clearTimeout( logTimer ); }
+	}
+	document.querySelectorAll( '.nav-item' ).forEach( function ( b ) { b.addEventListener( 'click', function () { setTab( b.getAttribute( 'data-tab' ) ); } ); } );
+	window.addEventListener( 'hashchange', function () { setTab( location.hash.replace( '#', '' ), false ); } );
+	function navDot( tab, on ) { var d = document.querySelector( '.nav-item[data-tab="' + tab + '"] .dot' ); if ( d ) { d.hidden = ! on; } }
 	var el = function ( tag, attrs, children ) {
 		var node = document.createElement( tag );
 		Object.keys( attrs || {} ).forEach( function ( k ) {
@@ -118,12 +134,35 @@
 	function renderTools( s ) {
 		var list = $( 'tools' );
 		list.textContent = '';
-		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.phpmyadmin, target: '_blank', rel: 'noopener', text: 'phpMyAdmin' } ), document.createTextNode( ' signed in as root' ) ] ) );
-		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.mailpit, target: '_blank', rel: 'noopener', text: 'Mailpit' } ), document.createTextNode( ' catches all outgoing mail' ) ] ) );
+		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.phpmyadmin, target: '_blank', rel: 'noopener', text: 'phpMyAdmin' } ), document.createTextNode( ' — every database, signed in as root' ) ] ) );
+		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.mailpit, target: '_blank', rel: 'noopener', text: 'Mailpit' } ), document.createTextNode( ' — every outgoing mail from every site' ) ] ) );
+		list.appendChild( el( 'li', {}, [ el( 'a', { href: 'https://dashboard.test/?api=status', target: '_blank', rel: 'noopener', text: 'Status JSON' } ), document.createTextNode( ' — what this page reads (bin/stack-status)' ) ] ) );
+	}
+
+	function renderPorts( s ) {
 		var byOwner = {};
 		Object.keys( s.ports || {} ).forEach( function ( p ) { var o = s.ports[ p ] || 'free'; ( byOwner[ o ] = byOwner[ o ] || [] ).push( p ); } );
-		var ports = Object.keys( byOwner ).sort().map( function ( o ) { return o + ' ' + byOwner[ o ].join( ', ' ); } ).join( '; ' );
-		list.appendChild( el( 'li', { text: 'Ports: ' + ports + '.' } ) );
+		$( 'ports' ).textContent = 'Ports: ' + Object.keys( byOwner ).sort().map( function ( o ) { return o + ' ' + byOwner[ o ].join( ', ' ); } ).join( '; ' ) + '.';
+	}
+
+	function renderStrip( s ) {
+		var strip = $( 'strip' );
+		strip.textContent = '';
+		var byName = {};
+		s.services.forEach( function ( x ) { byName[ x.name ] = x; } );
+		SERVICE_ORDER.forEach( function ( name ) {
+			var svc = byName[ name ];
+			if ( ! svc ) { return; }
+			var on = 'started' === svc.status;
+			var b = el( 'button', { type: 'button', title: 'Open Services' }, [ el( 'span', { 'class': 'lamp' + ( on ? ' on' : '' ), 'aria-hidden': 'true' } ), el( 'span', { text: LABELS[ name ] || name } ), el( 'span', { 'class': 'muted', text: on ? '' : 'off' } ) ] );
+			b.addEventListener( 'click', function () { setTab( 'services' ); } );
+			strip.appendChild( el( 'li', {}, [ b ] ) );
+		} );
+		( s.php || [] ).filter( function ( p ) { return 'started' === p.fpm; } ).forEach( function ( p ) {
+			var b = el( 'button', { type: 'button', title: 'Open PHP' }, [ el( 'span', { 'class': 'lamp on', 'aria-hidden': 'true' } ), el( 'span', { text: 'PHP ' + p.version } ), el( 'span', { 'class': 'muted', text: p['default'] ? 'default' : p.sites + ( 1 === p.sites ? ' site' : ' sites' ) } ) ] );
+			b.addEventListener( 'click', function () { setTab( 'php' ); } );
+			strip.appendChild( el( 'li', {}, [ b ] ) );
+		} );
 	}
 
 	function renderSites( s ) {
@@ -164,7 +203,9 @@
 		last = s;
 		$( 'summary' ).textContent = summary( s );
 		renderAlert( s );
+		renderStrip( s );
 		renderServices( s );
+		renderPorts( s );
 		renderPhp( s );
 		renderTools( s );
 		renderLogTabs( s );
@@ -174,15 +215,32 @@
 		pulse.classList.remove( 'tick' );
 		void pulse.offsetWidth;
 		pulse.classList.add( 'tick' );
+		lastLoaded = Date.now();
+		updateAge();
 	}
+
+	function updateAge() {
+		var el2 = $( 'age' );
+		if ( ! el2 || ! lastLoaded ) { return; }
+		var sec = Math.round( ( Date.now() - lastLoaded ) / 1000 );
+		el2.textContent = sec < 5 ? 'updated just now' : ( sec < 90 ? 'updated ' + sec + ' s ago' : 'updated ' + Math.round( sec / 60 ) + ' min ago' );
+	}
+	setInterval( updateAge, 5000 );
 
 	function refresh() {
 		clearTimeout( timer );
-		fetchStatus().then( render ).catch( function () {
+		var btn = $( 'refresh' );
+		if ( btn ) { btn.disabled = true; }
+		return fetchStatus().then( render ).catch( function () {
 			$( 'pulse' ).classList.add( 'stale' );
-			$( 'summary' ).textContent = 'Could not read the stack. Is nginx or php-fpm restarting? Retrying…';
-		} ).then( function () { timer = setTimeout( refresh, REFRESH_MS ); } );
+			$( 'summary' ).textContent = 'Could not read the stack. Is nginx or php-fpm restarting? Use Refresh to try again.';
+		} ).then( function () {
+			if ( btn ) { btn.disabled = false; }
+			if ( ! document.hidden ) { timer = setTimeout( refresh, REFRESH_MS ); }
+			if ( 'logs' === currentTab ) { logData = null; loadLog(); }
+		} );
 	}
+	$( 'refresh' ).addEventListener( 'click', function () { refresh(); } );
 
 
 	function fmtSize( b ) {
@@ -202,38 +260,55 @@
 		}
 		if ( errs.length ) { parts.push( 'launchd reports errors for ' + errs.join( ', ' ) ); }
 		box.hidden = 0 === parts.length;
-		box.textContent = parts.join( '. ' ) + ( parts.length ? '. Check the php-fpm and nginx logs below.' : '' );
+		box.textContent = parts.join( '. ' ) + ( parts.length ? '. Check the php-fpm and nginx logs.' : '' );
 		$( 'pulse' ).classList.toggle( 'stale', parts.length > 0 );
+		navDot( 'services', errs.length > 0 );
+		navDot( 'logs', crashes > 0 );
 	}
 
 	function logKey( d ) { return d.source + ( d.site ? ':' + d.site : '' ); }
 
 	function renderLogTabs( s ) {
 		var tabs = $( 'log-tabs' );
-		var list = ( s.logs || [] ).slice();
+		var sel = $( 'log-site' );
+		var list = ( s.logs || [] );
+		var stack = list.filter( function ( l ) { return ! l.site; } );
+		var sites = list.filter( function ( l ) { return l.site; } );
+		if ( ! logSource && stack.length ) { logSource = { source: stack[ 0 ].source, site: null }; }
 		tabs.textContent = '';
-		if ( ! logSource && list.length ) { logSource = { source: list[ 0 ].source.split( ' ' )[ 0 ], site: list[ 0 ].site || null }; }
-		list.forEach( function ( l ) {
-			var src = l.source.split( ' ' )[ 0 ];
-			var d = { source: src, site: l.site || null };
+		stack.forEach( function ( l ) {
+			var d = { source: l.source, site: null };
 			var selected = logSource && logKey( logSource ) === logKey( d );
 			var b = el( 'button', { 'class': 'log-tab', type: 'button', role: 'tab', 'aria-selected': selected ? 'true' : 'false' }, [
-				document.createTextNode( l.site ? l.site : l.source ),
-				el( 'span', { 'class': 'sz', text: l.exists ? fmtSize( l.size ) : '' } )
+				document.createTextNode( l.source ),
+				el( 'span', { 'class': 'sz', text: l.exists && l.size ? fmtSize( l.size ) : '' } )
 			] );
-			b.addEventListener( 'click', function () { logSource = d; logData = null; renderLogTabs( last ); loadLog(); } );
+			b.addEventListener( 'click', function () { logSource = d; logData = null; sel.value = ''; renderLogTabs( last ); loadLog(); } );
 			tabs.appendChild( b );
 		} );
-		if ( logSource && ! logData ) { loadLog(); }
+		var keep = sel.value;
+		while ( sel.options.length > 1 ) { sel.remove( 1 ); }
+		sites.forEach( function ( l ) {
+			var o = document.createElement( 'option' );
+			o.value = l.site; o.textContent = l.site + ( l.exists && l.size ? ' (' + fmtSize( l.size ) + ')' : '' );
+			sel.appendChild( o );
+		} );
+		sel.value = logSource && 'wp' === logSource.source ? logSource.site : ( keep || '' );
+		if ( 'logs' === currentTab && logSource && ! logData ) { loadLog(); }
 	}
+	$( 'log-site' ).addEventListener( 'change', function ( e ) {
+		if ( ! e.target.value ) { return; }
+		logSource = { source: 'wp', site: e.target.value }; logData = null;
+		renderLogTabs( last ); loadLog();
+	} );
 
 	function loadLog() {
 		clearTimeout( logTimer );
-		if ( ! logSource ) { return; }
+		if ( ! logSource || 'logs' !== currentTab ) { return; }
 		var q = '?api=log&source=' + encodeURIComponent( logSource.source ) + ( logSource.site ? '&site=' + encodeURIComponent( logSource.site ) : '' ) + '&n=300';
 		fetch( q, { cache: 'no-store' } ).then( function ( r ) { return r.json(); } ).then( function ( d ) {
 			if ( d && d.lines ) { logData = d; renderLog(); }
-		} ).catch( function () {} ).then( function () { logTimer = setTimeout( loadLog, REFRESH_MS ); } );
+		} ).catch( function () {} );
 	}
 
 	function renderLog() {
@@ -267,6 +342,9 @@
 		filterText = e.target.value;
 		if ( last ) { renderSites( last ); }
 	} );
-	document.addEventListener( 'visibilitychange', function () { if ( ! document.hidden ) { refresh(); } } );
+	document.addEventListener( 'visibilitychange', function () { if ( document.hidden ) { clearTimeout( timer ); } else { refresh(); } } );
+	var initial = location.hash.replace( '#', '' );
+	if ( ! initial ) { try { initial = localStorage.getItem( 'devstack.tab' ) || 'overview'; } catch ( e ) { initial = 'overview'; } }
+	setTab( initial, false );
 	refresh();
 }() );

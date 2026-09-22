@@ -69,7 +69,10 @@ bin/logs-prune                                   # rotate now (the LaunchAgent d
 
 - nginx and PHP errors land in `~/.config/valet/Log/`, the php-fpm master log, Redis and Mailpit in
   `/opt/homebrew/var/log/`, MySQL in `/opt/homebrew/var/mysql/*.err`, each WordPress site in its `wp-content/debug.log`.
-- The dashboard's **Logs** panel tails any of them live with severity colouring, a filter, and a Clear button. The
+- The dashboard is a left-rail app: Overview (service lamps + sites), PHP, Services, Logs, Tools. It reloads once a
+  minute while visible, never while hidden, and has a Refresh button; actions refresh immediately. Keeping it lean
+  leaves the CPU to the sites.
+- The dashboard's **Logs** tab tails any of them with severity colouring, a filter, and a Clear button. The
   masthead turns red when launchd reports a service in error or macOS wrote a crash report for php-fpm, nginx, mysqld,
   redis, memcached, mailpit or dnsmasq in the last 24 hours — the failures WordPress itself cannot report.
 - Retention: a user LaunchAgent (`com.local-devstack.logs-prune`) runs `bin/logs-prune` daily at 04:00. Each log is

@@ -154,67 +154,95 @@ header( 'Cache-Control: no-store' );
 <link rel="stylesheet" href="style.css?v=<?php echo (int) filemtime( __DIR__ . '/style.css' ); ?>">
 </head>
 <body>
-<header class="masthead">
-	<h1>local-devstack</h1>
-	<p class="summary" id="summary" aria-live="polite">Reading the stack…</p>
-	<p class="alert" id="alert" hidden role="status"></p>
-	<span class="pulse" id="pulse" title="Live" aria-hidden="true"></span>
-</header>
-
-<main>
-	<section class="panel" aria-labelledby="services-h">
-		<div class="panel-head">
-			<h2 id="services-h">Services</h2>
-			<p class="hint">Valet runs nginx, dnsmasq and php-fpm as root. MySQL and Mailpit run as you.</p>
+<div class="shell">
+	<aside class="rail" aria-label="Sections">
+		<div class="brand">
+			<span class="pulse" id="pulse" title="Live" aria-hidden="true"></span>
+			<h1>local-devstack</h1>
 		</div>
-		<ul class="switchboard" id="services"></ul>
-	</section>
-
-	<section class="panel" aria-labelledby="php-h">
-		<div class="panel-head">
-			<h2 id="php-h">PHP</h2>
-			<p class="hint">php-fpm only runs for versions a site uses. Isolate a site with <code>valet isolate php@8.2 --site=name</code> or <code>bin/site-new name --php 8.2</code>.</p>
+		<nav class="nav" role="tablist" aria-orientation="vertical">
+			<button class="nav-item" role="tab" data-tab="overview" aria-selected="true" aria-controls="tab-overview">Overview<span class="dot" hidden></span></button>
+			<button class="nav-item" role="tab" data-tab="php" aria-selected="false" aria-controls="tab-php">PHP<span class="dot" hidden></span></button>
+			<button class="nav-item" role="tab" data-tab="services" aria-selected="false" aria-controls="tab-services">Services<span class="dot" hidden></span></button>
+			<button class="nav-item" role="tab" data-tab="logs" aria-selected="false" aria-controls="tab-logs">Logs<span class="dot" hidden></span></button>
+			<button class="nav-item" role="tab" data-tab="tools" aria-selected="false" aria-controls="tab-tools">Tools<span class="dot" hidden></span></button>
+		</nav>
+		<div class="rail-foot">
+			<button class="act" type="button" id="refresh">Refresh</button>
+			<span id="age" aria-live="polite"></span>
+			<p>Reloads once a minute while this tab is visible. Actions run <code>bin/service</code> and <code>bin/php-xdebug</code>.</p>
 		</div>
-		<ul class="switchboard php" id="php"></ul>
-	</section>
+	</aside>
 
-	<section class="panel" aria-labelledby="tools-h">
-		<div class="panel-head">
-			<h2 id="tools-h">Tools</h2>
-		</div>
-		<ul class="tools" id="tools"></ul>
-	</section>
+	<main class="content">
+		<p class="alert" id="alert" hidden role="status"></p>
 
-	<section class="panel" aria-labelledby="logs-h">
-		<div class="panel-head">
-			<h2 id="logs-h">Logs</h2>
-			<p class="hint">Rotated daily at 04:00; today and yesterday are kept, nothing older than 48 hours.</p>
-		</div>
-		<div class="log-tabs" id="log-tabs" role="tablist"></div>
-		<div class="log-tools">
-			<label class="filter"><span class="visually-hidden">Filter log lines</span><input type="search" id="log-filter" placeholder="Filter lines" autocomplete="off"></label>
-			<span class="log-meta" id="log-meta"></span>
-			<button class="act quiet" type="button" id="log-clear">Clear this log</button>
-		</div>
-		<pre class="log" id="log-body" tabindex="0" aria-live="off"></pre>
-	</section>
+		<section class="tab" id="tab-overview" role="tabpanel" data-tab="overview">
+			<header class="tab-head">
+				<h2>Overview</h2>
+				<p class="summary" id="summary" aria-live="polite">Reading the stack…</p>
+			</header>
+			<ul class="strip" id="strip" aria-label="Service status"></ul>
+			<div class="panel-head">
+				<h3>Sites <span class="count" id="sites-count"></span></h3>
+				<label class="filter"><span class="visually-hidden">Filter sites</span><input type="search" id="filter" placeholder="Filter sites" autocomplete="off"></label>
+			</div>
+			<table class="sites" id="sites">
+				<thead><tr><th scope="col">Site</th><th scope="col">PHP</th><th scope="col">HTTPS</th><th scope="col">Open</th><th scope="col">Folder</th></tr></thead>
+				<tbody></tbody>
+			</table>
+			<p class="empty" id="sites-empty" hidden></p>
+		</section>
 
-	<section class="panel" aria-labelledby="sites-h">
-		<div class="panel-head">
-			<h2 id="sites-h">Sites <span class="count" id="sites-count"></span></h2>
-			<label class="filter"><span class="visually-hidden">Filter sites</span><input type="search" id="filter" placeholder="Filter sites" autocomplete="off"></label>
-		</div>
-		<table class="sites" id="sites">
-			<thead><tr><th scope="col">Site</th><th scope="col">PHP</th><th scope="col">HTTPS</th><th scope="col">Open</th><th scope="col">Folder</th></tr></thead>
-			<tbody></tbody>
-		</table>
-		<p class="empty" id="sites-empty" hidden></p>
-	</section>
-</main>
+		<section class="tab" id="tab-php" role="tabpanel" data-tab="php" hidden>
+			<header class="tab-head">
+				<h2>PHP</h2>
+				<p class="hint">php-fpm only runs for versions a site uses. Put a site on a version with <code>bin/site-new name --php 8.2</code> or <code>valet isolate php@8.2 --site=name</code>.</p>
+			</header>
+			<ul class="switchboard php" id="php"></ul>
+		</section>
 
-<footer class="foot">
-	<p id="foot">Refreshes every 5 seconds. Actions run <code>bin/service</code> and <code>bin/php-xdebug</code> from the repo.</p>
-</footer>
+		<section class="tab" id="tab-services" role="tabpanel" data-tab="services" hidden>
+			<header class="tab-head">
+				<h2>Services</h2>
+				<p class="hint">Valet runs nginx, dnsmasq and php-fpm as root. MySQL, Mailpit, Redis and Memcached run as you.</p>
+			</header>
+			<ul class="switchboard" id="services"></ul>
+			<p class="ports" id="ports"></p>
+		</section>
+
+		<section class="tab" id="tab-logs" role="tabpanel" data-tab="logs" hidden>
+			<header class="tab-head">
+				<h2>Logs</h2>
+				<p class="hint">Rotated daily at 04:00. Today and yesterday are kept; nothing older than 48 hours.</p>
+			</header>
+			<div class="log-pick">
+				<div class="log-tabs" id="log-tabs" role="tablist" aria-label="Stack logs"></div>
+				<label class="log-site"><span class="visually-hidden">Site log</span><select id="log-site"><option value="">Site log…</option></select></label>
+			</div>
+			<div class="log-tools">
+				<label class="filter"><span class="visually-hidden">Filter log lines</span><input type="search" id="log-filter" placeholder="Filter lines" autocomplete="off"></label>
+				<span class="log-meta" id="log-meta"></span>
+				<button class="act quiet" type="button" id="log-clear">Clear this log</button>
+			</div>
+			<pre class="log" id="log-body" tabindex="0" aria-live="off"></pre>
+		</section>
+
+		<section class="tab" id="tab-tools" role="tabpanel" data-tab="tools" hidden>
+			<header class="tab-head">
+				<h2>Tools</h2>
+			</header>
+			<ul class="tools" id="tools"></ul>
+			<h3>From the terminal</h3>
+			<pre class="cheat">bin/site-new name --php 8.2        new WordPress site at https://name.test
+bin/site-import name export.zip    LocalWP export, or any folder + .sql
+bin/site-remove name --yes         unlink, unsecure, drop database, delete folder
+bin/php-xdebug on --php 8.4        trigger mode on port 9003
+bin/service redis restart          nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
+bin/logs php -n 100                nginx php php-fpm mysql redis mailpit, wp &lt;site&gt;, crashes</pre>
+		</section>
+	</main>
+</div>
 <script src="app.js?v=<?php echo (int) filemtime( __DIR__ . '/app.js' ); ?>"></script>
 </body>
 </html>
