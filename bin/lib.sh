@@ -57,13 +57,22 @@ site_row() {
 all_hosts() { awk -F'\t' '$0 !~ /^#/ && NF >= 5 { print $1 }' "$SITES_TSV"; }
 
 # php_bin php@7.4 -> /opt/homebrew/opt/php@7.4/bin/php
-php_bin() { printf '%s/opt/%s/bin/php\n' "$BREW_PREFIX" "$1"; }
+php_bin() {
+	# Homebrew's current `php` formula carries the newest version and is only *aliased* php@X.Y (no opt/php@X.Y link).
+	if [ -x "$BREW_PREFIX/opt/$1/bin/php" ]; then printf '%s/opt/%s/bin/php\n' "$BREW_PREFIX" "$1"; return; fi
+	if [ -x "$BREW_PREFIX/opt/php/bin/php" ] && [ "php@$("$BREW_PREFIX/opt/php/bin/php" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')" = "$1" ]; then printf '%s/opt/php/bin/php\n' "$BREW_PREFIX"; return; fi
+	printf '%s/opt/%s/bin/php\n' "$BREW_PREFIX" "$1"
+}
 
 # wp_site <php formula> <site path> <wp args...> : WP-CLI under the site's PHP, core only (mu-plugins still load).
+# WP-CLI resets error_reporting itself, so on PHP 8.5/8.6 its own deprecations reach stdout; strip those lines
+# (never data) and keep WP-CLI's exit status.
 wp_site() {
-	local php="$1" path="$2"
+	local php="$1" path="$2" out rc=0
 	shift 2
-	"$(php_bin "$php")" -d display_errors=stderr "$BREW_PREFIX/bin/wp" --path="$path" --skip-plugins --skip-themes "$@"
+	out="$("$(php_bin "$php")" -d display_errors=stderr "$BREW_PREFIX/bin/wp" --path="$path" --skip-plugins --skip-themes "$@")" || rc=$?
+	[ -z "$out" ] || printf '%s\n' "$out" | /usr/bin/grep -vE '^(Deprecated|Warning|Notice|Strict Standards): |^$' || true
+	return "$rc"
 }
 
 mysql_new()     { "$BREW_PREFIX/opt/mysql@8.4/bin/mysql" -uroot "$@"; }

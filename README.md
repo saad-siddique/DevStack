@@ -5,6 +5,8 @@ Laravel Valet + Homebrew PHP (8.4 default, 7.4 for compatibility sites) + `mysql
 plus the scripts that migrate sites off MAMP PRO and, later, a small menu-bar app that drives the same scripts.
 
 **Status (2026-09-22):** All 24 hosts on Valet; MAMP PRO stopped and backed out of the system (apps kept for now).
+PHP 7.4 and every 8.x (8.0–8.6) are installed; php-fpm runs only for versions a site uses (8.4 default, 7.4 for three
+sites). Redis and Memcached run as brew services.
 Phase 5 tooling built: `site-new`, `site-import` (LocalWP exports), `site-remove`, `php-xdebug`, `service`, phpMyAdmin
 at `https://phpmyadmin.test` (auto-login as root), and a dashboard at `https://dashboard.test` that shows services,
 sites and PHP versions and can start/stop services and toggle Xdebug. Not built yet: the `app/` menu-bar app.
@@ -51,11 +53,12 @@ bin/mamp-backout                                  # after MAMP PRO is stopped: h
 ## Day-to-day commands
 
 ```bash
-bin/site-new myplugin --php 7.4                  # fresh WordPress at https://myplugin.test, prints the admin password once
+bin/site-new myplugin --php 8.2                  # fresh WordPress at https://myplugin.test, prints the admin password once
+                                                 # --php accepts 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (default), 8.5, 8.6
 bin/site-import client ~/Downloads/client.zip    # LocalWP export (or any zip/folder with a WordPress root + .sql)
 bin/site-remove myplugin --yes                   # unlink, unsecure, drop DB + user, delete folder
 bin/php-xdebug on --php 8.4                      # trigger mode, port 9003; use a browser Xdebug helper or XDEBUG_TRIGGER=1
-bin/service mailpit restart                      # nginx dnsmasq php@8.4 php@7.4 mysql@8.4 mailpit
+bin/service mailpit restart                      # nginx dnsmasq mysql@8.4 mailpit redis memcached php@<any installed>
 bin/stack-status | jq .                          # what the dashboard reads
 ```
 
@@ -99,5 +102,13 @@ scripts can run it too.
   fixed chunk first.
 - Xdebug from `shivammathur/extensions` ships as `conf.d/20-xdebug.ini`; off = renamed to `.off`. Bootstrap turns it off
   the first time it sees it, then `bin/php-xdebug` owns the state.
+- Homebrew's newest PHP is the `php` formula, only *aliased* `php@8.5` (no `opt/php@8.5`, service name `php`). `php_bin`
+  in `bin/lib.sh` and `bin/service` map the alias; the Brewfile pins `link: false` so it never steals the `php` symlink.
+- Valet 4.12.0 knows PHP versions up to 8.5. Bootstrap appends newer tap builds (8.6) to its `SUPPORTED_PHP_VERSIONS`
+  so `valet isolate php@8.6` works; re-applied after every `composer global update`.
+- The Redis *cask* cannot be managed by `brew services`; it was replaced by the `redis` formula. A pre-existing
+  `redis.conf` had `daemonize yes`, which makes launchd think the service died. Bootstrap does not touch redis.conf;
+  keep `daemonize no`. Docker's automator-platform Redis binds `*:6379` while Homebrew's binds `127.0.0.1:6379`; both
+  coexist, and `127.0.0.1` reaches Homebrew's.
 - "Class not found" fatals after switching plugin branches are a stale Composer classmap: `composer dump-autoload`
   in the plugin repo, not a stack problem.

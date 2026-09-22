@@ -41,7 +41,7 @@ h2 { font-size: 18px; font-weight: 700; }
 
 /* Switchboard: lamps in a row. */
 .switchboard { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 14px; }
-.switchboard.xdebug { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.svc.is-default { outline: 1.5px solid var(--accent); outline-offset: -1.5px; }
 .svc { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--chip); min-height: 60px; }
 .svc-name { flex: 1; min-width: 0; }
 .lamp { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--off); transition: background .25s ease, box-shadow .35s ease; }

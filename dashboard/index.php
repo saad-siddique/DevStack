@@ -74,7 +74,10 @@ if ( '' !== $api ) {
 	}
 
 	if ( 'service' === $api && $is_write ) {
-		$allowed_names = array( 'nginx', 'dnsmasq', 'php@8.4', 'php@7.4', 'mysql@8.4', 'mailpit' );
+		$allowed_names = array( 'nginx', 'dnsmasq', 'mysql@8.4', 'mailpit', 'redis', 'memcached' );
+		foreach ( glob( '/opt/homebrew/etc/php/*/conf.d', GLOB_ONLYDIR ) ?: array() as $conf_dir ) {
+			$allowed_names[] = 'php@' . basename( dirname( $conf_dir ) );
+		}
 		$allowed_ops   = array( 'start', 'stop', 'restart' );
 		$name          = (string) ( $_POST['name'] ?? '' );
 		$op            = (string) ( $_POST['op'] ?? '' );
@@ -88,7 +91,8 @@ if ( '' !== $api ) {
 	if ( 'xdebug' === $api && $is_write ) {
 		$php = (string) ( $_POST['php'] ?? '' );
 		$op  = (string) ( $_POST['op'] ?? '' );
-		if ( ! in_array( $php, array( '8.4', '7.4' ), true ) || ! in_array( $op, array( 'on', 'off' ), true ) ) {
+		$php_versions = array_map( static function ( $d ) { return basename( dirname( $d ) ); }, glob( '/opt/homebrew/etc/php/*/conf.d', GLOB_ONLYDIR ) ?: array() );
+		if ( ! in_array( $php, $php_versions, true ) || ! in_array( $op, array( 'on', 'off' ), true ) ) {
 			devstack_json( 400, array( 'error' => 'Unknown PHP version or operation.' ) );
 		}
 		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/php-xdebug', $op, '--php', $php, '--json' ), $home );
@@ -124,7 +128,14 @@ header( 'Cache-Control: no-store' );
 			<p class="hint">Valet runs nginx, dnsmasq and php-fpm as root. MySQL and Mailpit run as you.</p>
 		</div>
 		<ul class="switchboard" id="services"></ul>
-		<ul class="switchboard xdebug" id="xdebug"></ul>
+	</section>
+
+	<section class="panel" aria-labelledby="php-h">
+		<div class="panel-head">
+			<h2 id="php-h">PHP</h2>
+			<p class="hint">php-fpm only runs for versions a site uses. Isolate a site with <code>valet isolate php@8.2 --site=name</code> or <code>bin/site-new name --php 8.2</code>.</p>
+		</div>
+		<ul class="switchboard php" id="php"></ul>
 	</section>
 
 	<section class="panel" aria-labelledby="tools-h">

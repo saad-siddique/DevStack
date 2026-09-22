@@ -11,7 +11,9 @@ COMPOSER_BIN="$HOME/.composer/vendor/bin"
 VALET_BIN="$BREW_PREFIX/bin/valet"   # the sudoers alias written by `valet trust` matches this path only
 VALET_HOME="$HOME/.config/valet"
 DEFAULT_PHP="php@8.4"
-PHP_VERSIONS=(8.4 7.4)
+# Every PHP version Homebrew has an etc/php/<v> dir for (filled after ensure_formulae).
+PHP_VERSIONS=()
+php_versions_installed() { PHP_VERSIONS=(); local d; for d in "$BREW_PREFIX"/etc/php/*/; do [ -d "$d/conf.d" ] && PHP_VERSIONS+=("$(basename "$d")"); done; }
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m ✓ \033[0m %s\n' "$*"; }
@@ -158,6 +160,13 @@ ensure_valet() {
 		add_ipv6_listen "$HOME/.composer/vendor/laravel/valet/cli/stubs/$stub"
 	done
 	# /etc/resolver/test is written by the last-but-one install step (dnsmasq); its absence means an incomplete install.
+	# Valet 4.12.0's SUPPORTED_PHP_VERSIONS stops at php@8.5; add newer tap builds so `valet isolate php@8.6` works.
+	local brewphp="$HOME/.composer/vendor/laravel/valet/cli/Valet/Brew.php" v
+	for v in 8.6 8.7; do
+		if [ -d "$BREW_PREFIX/opt/php@$v" ] && ! /usr/bin/grep -q "'php@$v'" "$brewphp"; then
+			sed -i '' "s/'php@8.5',/'php@8.5',\n        'php@$v',/" "$brewphp" && ok "valet: added php@$v to supported versions"
+		fi
+	done
 	if [ ! -f "$VALET_HOME/config.json" ] || [ ! -f /etc/resolver/test ]; then
 		warn "valet install (asks for sudo unless already trusted)"
 		valet install
@@ -179,6 +188,16 @@ ensure_services() {
 	log "Data services"
 	brew services start mysql@8.4 > /dev/null 2>&1 || true
 	ok "mysql@8.4 $(brew services list | awk '$1=="mysql@8.4"{print $2}')"
+	brew services start memcached > /dev/null 2>&1 || true
+	ok "memcached $(brew services list | awk '$1=="memcached"{print $2}')"
+	local rowner
+	rowner="$(lsof -nP -iTCP:6379 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"
+	if [ -n "$rowner" ] && [ "redis-ser" != "${rowner:0:9}" ]; then
+		warn "port 6379 is held by $rowner (Docker?) — Homebrew redis not started; stop that container or run: bin/service redis start"
+	else
+		brew services start redis > /dev/null 2>&1 || true
+		ok "redis $(brew services list | awk '$1=="redis"{print $2}')"
+	fi
 	local owner
 	owner="$(lsof -nP -iTCP:1025 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"
 	if [ -n "$owner" ] && [ "mailpit" != "$owner" ]; then
@@ -200,6 +219,7 @@ ensure_dashboard() {
 
 ensure_brew
 ensure_formulae
+php_versions_installed
 ensure_php_linked
 ensure_php_ini
 ensure_xdebug_default_off

@@ -3,8 +3,9 @@
 # Controls one stack service. Valet runs nginx/dnsmasq/php-fpm as root, mysql/mailpit run as the user.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-ALLOWED=(nginx dnsmasq php@8.4 php@7.4 mysql@8.4 mailpit)
-ROOT_DOMAIN=(nginx dnsmasq php@8.4 php@7.4)
+ALLOWED=(nginx dnsmasq mysql@8.4 mailpit redis memcached)
+for d in "$BREW_PREFIX"/etc/php/*/; do [ -d "$d/conf.d" ] && ALLOWED+=("php@$(basename "$d")"); done
+ROOT_DOMAIN=(nginx dnsmasq)   # plus every php@X.Y (Valet runs php-fpm as root)
 NAME="" ; OP="" ; JSON=0
 for arg in "$@"; do
 	case "$arg" in
@@ -17,16 +18,26 @@ done
 [ -n "$NAME" ] && [ -n "$OP" ] || die "usage: service <name> start|stop|restart|status [--json]"
 printf '%s\n' "${ALLOWED[@]}" | /usr/bin/grep -qx -- "$NAME" || die "unknown service '$NAME' (allowed: ${ALLOWED[*]})"
 
-is_root_domain() { printf '%s\n' "${ROOT_DOMAIN[@]}" | /usr/bin/grep -qx -- "$1"; }
+is_root_domain() { case "$1" in nginx|dnsmasq|php@*|php) return 0 ;; *) return 1 ;; esac; }
+# Homebrew's newest PHP is the `php` formula, only aliased php@X.Y; brew services knows it as "php".
+FORMULA="$NAME"
+case "$NAME" in php@*) [ -d "$BREW_PREFIX/opt/$NAME" ] || FORMULA="php" ;; esac
 brew_services() {
 	if is_root_domain "$NAME"; then sudo -n "$BREW_PREFIX/bin/brew" services "$@"; else "$BREW_PREFIX/bin/brew" services "$@"; fi
 }
 
 if [ "status" != "$OP" ]; then
-	brew_services "$OP" "$NAME" > /dev/null 2>&1 || die "brew services $OP $NAME failed"
+	if ! brew_services "$OP" "$FORMULA" > /dev/null 2>&1; then
+		hint=""
+		case "$NAME" in
+			redis) o="$(lsof -nP -iTCP:6379 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"; [ -n "$o" ] && hint=" (port 6379 is held by $o — a Docker container?)" ;;
+			mailpit) o="$(lsof -nP -iTCP:1025 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"; [ -n "$o" ] && hint=" (port 1025 is held by $o)" ;;
+		esac
+		die "brew services $OP $NAME failed$hint"
+	fi
 	sleep 1
 fi
 
 status_json="$( { sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; } \
-	| jq -s --arg n "$NAME" 'add | map(select(.name == $n)) | (max_by(if .status == "started" then 1 else 0 end) // {name:$n,status:"unknown",user:null}) | {name, status, user}')"
+	| jq -s --arg n "$FORMULA" --arg shown "$NAME" 'add | map(select(.name == $n)) | (max_by(if .status == "started" then 1 else 0 end) // {name:$n,status:"unknown",user:null}) | {name:$shown, status, user}')"
 if [ "1" = "$JSON" ]; then echo "$status_json"; else echo "$status_json" | jq -r '"\(.name): \(.status)\(if .user then " (" + .user + ")" else "" end)"'; fi

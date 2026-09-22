@@ -2,9 +2,9 @@
 (function () {
 	'use strict';
 
-	var SERVICE_ORDER = [ 'nginx', 'dnsmasq', 'php@8.4', 'php@7.4', 'mysql@8.4', 'mailpit' ];
-	var LABELS = { 'nginx': 'nginx', 'dnsmasq': 'dnsmasq', 'php@8.4': 'PHP 8.4', 'php@7.4': 'PHP 7.4', 'mysql@8.4': 'MySQL 8.4', 'mailpit': 'Mailpit' };
-	var ROLES  = { 'nginx': 'web server', 'dnsmasq': '.test DNS', 'php@8.4': 'php-fpm', 'php@7.4': 'php-fpm', 'mysql@8.4': 'database', 'mailpit': 'mail catcher' };
+	var SERVICE_ORDER = [ 'nginx', 'dnsmasq', 'mysql@8.4', 'mailpit', 'redis', 'memcached' ];
+	var LABELS = { 'nginx': 'nginx', 'dnsmasq': 'dnsmasq', 'mysql@8.4': 'MySQL 8.4', 'mailpit': 'Mailpit', 'redis': 'Redis', 'memcached': 'Memcached' };
+	var ROLES  = { 'nginx': 'web server', 'dnsmasq': '.test DNS', 'mysql@8.4': 'database', 'mailpit': 'mail catcher', 'redis': 'object cache', 'memcached': 'object cache' };
 	var REFRESH_MS = 5000;
 	var busy = false;
 	var timer = null;
@@ -32,9 +32,9 @@
 
 	function summary( s ) {
 		var sites = s.sites.length;
-		var php = s.services.filter( function ( x ) { return /^php@/.test( x.name ) && 'started' === x.status; } ).map( function ( x ) { return x.name.replace( 'php@', '' ); } );
+		var running = ( s.php || [] ).filter( function ( p ) { return 'started' === p.fpm; } ).map( function ( p ) { return p.version; } );
 		var parts = [ sites + ( 1 === sites ? ' site' : ' sites' ) ];
-		if ( php.length ) { parts.push( 'PHP ' + php.join( ' and ' ) ); }
+		if ( s.php && s.php.length ) { parts.push( s.php.length + ' PHP versions installed, ' + ( running.length ? running.join( ' and ' ) + ' running' : 'none running' ) ); }
 		if ( s.mysql && s.mysql.version ) { parts.push( 'MySQL ' + s.mysql.version + ( null !== s.mysql.qps ? ' at ' + Math.round( s.mysql.qps ) + ' queries/s' : '' ) ); }
 		if ( s.mail && s.mail.backend ) { parts.push( ( 'mailpit' === s.mail.backend ? 'Mailpit' : 'MailHog' ) + ' holding ' + s.mail.total + ( 1 === s.mail.total ? ' message' : ' messages' ) ); }
 		return parts.join( ', ' ) + '.';
@@ -65,16 +65,30 @@
 			] ) );
 		} );
 
-		var xd = $( 'xdebug' );
-		xd.textContent = '';
-		Object.keys( s.xdebug || {} ).sort().reverse().forEach( function ( v ) {
-			var on = true === s.xdebug[ v ];
-			var actions = el( 'span', { 'class': 'actions' }, [
-				button( on ? 'Turn off' : 'Turn on', on ? 'quiet' : 'primary', function () { return post( 'xdebug', { php: v, op: on ? 'off' : 'on' } ); } )
-			] );
-			xd.appendChild( el( 'li', { 'class': 'svc' }, [
-				el( 'span', { 'class': 'lamp' + ( on ? ' on' : '' ), 'aria-hidden': 'true' } ),
-				el( 'span', { 'class': 'svc-name', text: 'Xdebug for PHP ' + v }, [ el( 'span', { 'class': 'svc-state', text: on ? 'on, waits for a trigger on port 9003' : 'off, no overhead' } ) ] ),
+	}
+
+	function renderPhp( s ) {
+		var list = $( 'php' );
+		list.textContent = '';
+		( s.php || [] ).forEach( function ( p ) {
+			var running = 'started' === p.fpm;
+			var svcName = 'php@' + p.version;
+			var state;
+			if ( p['default'] ) { state = 'default for new sites, ' + p.sites + ( 1 === p.sites ? ' site' : ' sites' ); }
+			else if ( p.sites > 0 ) { state = p.sites + ( 1 === p.sites ? ' site' : ' sites' ) + ( running ? '' : ', php-fpm stopped' ); }
+			else { state = running ? 'php-fpm running, no sites' : 'idle, php-fpm stopped'; }
+			if ( p.xdebug ) { state += ', Xdebug on'; }
+			var actions = el( 'span', { 'class': 'actions' } );
+			actions.appendChild( button( p.xdebug ? 'Xdebug off' : 'Xdebug on', p.xdebug ? 'quiet' : '', function () { return post( 'xdebug', { php: p.version, op: p.xdebug ? 'off' : 'on' } ); } ) );
+			if ( running ) {
+				actions.appendChild( button( 'Restart', '', function () { return post( 'service', { name: svcName, op: 'restart' } ); } ) );
+				if ( ! p['default'] ) { actions.appendChild( button( 'Stop', 'quiet', function () { return post( 'service', { name: svcName, op: 'stop' } ); } ) ); }
+			} else {
+				actions.appendChild( button( 'Start', 'primary', function () { return post( 'service', { name: svcName, op: 'start' } ); } ) );
+			}
+			list.appendChild( el( 'li', { 'class': 'svc' + ( p['default'] ? ' is-default' : '' ) }, [
+				el( 'span', { 'class': 'lamp' + ( running ? ' on' : '' ), 'aria-hidden': 'true' } ),
+				el( 'span', { 'class': 'svc-name', text: 'PHP ' + ( p.full || p.version ) }, [ el( 'span', { 'class': 'svc-state', text: state } ) ] ),
 				actions
 			] ) );
 		} );
@@ -102,8 +116,10 @@
 		list.textContent = '';
 		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.phpmyadmin, target: '_blank', rel: 'noopener', text: 'phpMyAdmin' } ), document.createTextNode( ' signed in as root' ) ] ) );
 		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.mailpit, target: '_blank', rel: 'noopener', text: 'Mailpit' } ), document.createTextNode( ' catches all outgoing mail' ) ] ) );
-		var ports = Object.keys( s.ports || {} ).map( function ( p ) { return p + ' ' + ( s.ports[ p ] || 'free' ); } ).join( ', ' );
-		list.appendChild( el( 'li', { text: 'Ports: ' + ports } ) );
+		var byOwner = {};
+		Object.keys( s.ports || {} ).forEach( function ( p ) { var o = s.ports[ p ] || 'free'; ( byOwner[ o ] = byOwner[ o ] || [] ).push( p ); } );
+		var ports = Object.keys( byOwner ).sort().map( function ( o ) { return o + ' ' + byOwner[ o ].join( ', ' ); } ).join( '; ' );
+		list.appendChild( el( 'li', { text: 'Ports: ' + ports + '.' } ) );
 	}
 
 	function renderSites( s ) {
@@ -144,6 +160,7 @@
 		last = s;
 		$( 'summary' ).textContent = summary( s );
 		renderServices( s );
+		renderPhp( s );
 		renderTools( s );
 		renderSites( s );
 		var pulse = $( 'pulse' );
