@@ -10,6 +10,10 @@
 	var timer = null;
 	var last = null;
 	var filterText = '';
+	var logSource = null;      // { source: 'php' } or { source: 'wp', site: 'x' }
+	var logFilter = '';
+	var logTimer = null;
+	var logData = null;
 
 	var $ = function ( id ) { return document.getElementById( id ); };
 	var el = function ( tag, attrs, children ) {
@@ -159,9 +163,11 @@
 	function render( s ) {
 		last = s;
 		$( 'summary' ).textContent = summary( s );
+		renderAlert( s );
 		renderServices( s );
 		renderPhp( s );
 		renderTools( s );
+		renderLogTabs( s );
 		renderSites( s );
 		var pulse = $( 'pulse' );
 		pulse.classList.remove( 'stale' );
@@ -177,6 +183,85 @@
 			$( 'summary' ).textContent = 'Could not read the stack. Is nginx or php-fpm restarting? Retrying…';
 		} ).then( function () { timer = setTimeout( refresh, REFRESH_MS ); } );
 	}
+
+
+	function fmtSize( b ) {
+		if ( b < 1024 ) { return b + ' B'; }
+		if ( b < 1048576 ) { return Math.round( b / 1024 ) + ' KB'; }
+		return ( b / 1048576 ).toFixed( 1 ) + ' MB';
+	}
+
+	function renderAlert( s ) {
+		var box = $( 'alert' );
+		var errs = s.services.filter( function ( x ) { return /^error/.test( x.status ); } ).map( function ( x ) { return x.name; } );
+		var crashes = s.crashes ? s.crashes.count : 0;
+		var parts = [];
+		if ( crashes ) {
+			var procs = s.crashes.reports.map( function ( r ) { return r.process; } ).filter( function ( v, i, a ) { return a.indexOf( v ) === i; } );
+			parts.push( crashes + ( 1 === crashes ? ' crash report' : ' crash reports' ) + ' in the last 24 hours (' + procs.join( ', ' ) + ')' );
+		}
+		if ( errs.length ) { parts.push( 'launchd reports errors for ' + errs.join( ', ' ) ); }
+		box.hidden = 0 === parts.length;
+		box.textContent = parts.join( '. ' ) + ( parts.length ? '. Check the php-fpm and nginx logs below.' : '' );
+		$( 'pulse' ).classList.toggle( 'stale', parts.length > 0 );
+	}
+
+	function logKey( d ) { return d.source + ( d.site ? ':' + d.site : '' ); }
+
+	function renderLogTabs( s ) {
+		var tabs = $( 'log-tabs' );
+		var list = ( s.logs || [] ).slice();
+		tabs.textContent = '';
+		if ( ! logSource && list.length ) { logSource = { source: list[ 0 ].source.split( ' ' )[ 0 ], site: list[ 0 ].site || null }; }
+		list.forEach( function ( l ) {
+			var src = l.source.split( ' ' )[ 0 ];
+			var d = { source: src, site: l.site || null };
+			var selected = logSource && logKey( logSource ) === logKey( d );
+			var b = el( 'button', { 'class': 'log-tab', type: 'button', role: 'tab', 'aria-selected': selected ? 'true' : 'false' }, [
+				document.createTextNode( l.site ? l.site : l.source ),
+				el( 'span', { 'class': 'sz', text: l.exists ? fmtSize( l.size ) : '' } )
+			] );
+			b.addEventListener( 'click', function () { logSource = d; logData = null; renderLogTabs( last ); loadLog(); } );
+			tabs.appendChild( b );
+		} );
+		if ( logSource && ! logData ) { loadLog(); }
+	}
+
+	function loadLog() {
+		clearTimeout( logTimer );
+		if ( ! logSource ) { return; }
+		var q = '?api=log&source=' + encodeURIComponent( logSource.source ) + ( logSource.site ? '&site=' + encodeURIComponent( logSource.site ) : '' ) + '&n=300';
+		fetch( q, { cache: 'no-store' } ).then( function ( r ) { return r.json(); } ).then( function ( d ) {
+			if ( d && d.lines ) { logData = d; renderLog(); }
+		} ).catch( function () {} ).then( function () { logTimer = setTimeout( loadLog, REFRESH_MS ); } );
+	}
+
+	function renderLog() {
+		var pre = $( 'log-body' );
+		var meta = $( 'log-meta' );
+		if ( ! logData ) { return; }
+		var q = logFilter.trim().toLowerCase();
+		var lines = logData.lines.filter( function ( l ) { return ! q || -1 !== l.text.toLowerCase().indexOf( q ); } );
+		var atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+		pre.textContent = '';
+		if ( ! lines.length ) {
+			pre.appendChild( el( 'span', { 'class': 'empty-log', text: logData.lines.length ? 'No lines match “' + logFilter.trim() + '”.' : 'Nothing logged yet. That is the good outcome.' } ) );
+		} else {
+			lines.forEach( function ( l ) { pre.appendChild( el( 'span', { 'class': 'l-' + l.level, text: l.text + '\n' } ) ); } );
+		}
+		if ( atBottom ) { pre.scrollTop = pre.scrollHeight; }
+		var errors = logData.lines.filter( function ( l ) { return 'error' === l.level; } ).length;
+		meta.textContent = logData.path.replace( last && last.sites_dir ? last.sites_dir : '~/Sites', '~/Sites' ) + ', ' + fmtSize( logData.size ) + ', last ' + logData.lines.length + ' lines' + ( errors ? ', ' + errors + ' error lines' : '' );
+	}
+
+	$( 'log-filter' ).addEventListener( 'input', function ( e ) { logFilter = e.target.value; renderLog(); } );
+	$( 'log-clear' ).addEventListener( 'click', function () {
+		if ( ! logSource || busy ) { return; }
+		busy = true;
+		post( 'log-clear', { source: logSource.source, site: logSource.site || '' } ).then( function ( r ) {
+			if ( r && r.error ) { showError( r.error ); }
+		} ).catch( function ( e ) { showError( String( e ) ); } ).then( function () { busy = false; logData = null; loadLog(); refresh(); } );
+	} );
 
 	$( 'filter' ).addEventListener( 'input', function ( e ) {
 		filterText = e.target.value;

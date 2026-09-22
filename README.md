@@ -24,7 +24,7 @@ drivers/              LocalValetDriver for the subdirectory multisite (wpmu)
 mu-plugins/           uo-local-ssl.php (https_ssl_verify → false, local only)
 dashboard/            interim dashboard.test (one PHP file), retired once app/ exists
 bin/                  THE CONTRACT — every command supports --json where output is consumed by tooling
-                      site-new  site-import  site-remove  php-xdebug  service  stack-status
+                      site-new  site-import  site-remove  php-xdebug  service  stack-status  logs  logs-prune
                       migrate-site  migrate-all  mamp-backout
 app/                  SwiftUI MenuBarExtra + Swift Charts (macOS 13+), Swift Package; only ever calls bin/*
 docs/                 the handoff/plan and, later, runbooks
@@ -60,7 +60,21 @@ bin/site-remove myplugin --yes                   # unlink, unsecure, drop DB + u
 bin/php-xdebug on --php 8.4                      # trigger mode, port 9003; use a browser Xdebug helper or XDEBUG_TRIGGER=1
 bin/service mailpit restart                      # nginx dnsmasq mysql@8.4 mailpit redis memcached php@<any installed>
 bin/stack-status | jq .                          # what the dashboard reads
+bin/logs list                                    # every stack log with size: nginx php php-fpm mysql redis mailpit, wp <site>
+bin/logs php -n 100                              # tail one; `bin/logs crashes` lists macOS crash reports for stack processes
+bin/logs-prune                                   # rotate now (the LaunchAgent does this daily at 04:00)
 ```
+
+## Logs and retention
+
+- nginx and PHP errors land in `~/.config/valet/Log/`, the php-fpm master log, Redis and Mailpit in
+  `/opt/homebrew/var/log/`, MySQL in `/opt/homebrew/var/mysql/*.err`, each WordPress site in its `wp-content/debug.log`.
+- The dashboard's **Logs** panel tails any of them live with severity colouring, a filter, and a Clear button. The
+  masthead turns red when launchd reports a service in error or macOS wrote a crash report for php-fpm, nginx, mysqld,
+  redis, memcached, mailpit or dnsmasq in the last 24 hours — the failures WordPress itself cannot report.
+- Retention: a user LaunchAgent (`com.local-devstack.logs-prune`) runs `bin/logs-prune` daily at 04:00. Each log is
+  copied to `.1` and truncated in place, so writers keep appending; `.1` files older than 48 hours are deleted and any
+  live log over 100 MB is rotated immediately. Nothing older than two days survives.
 
 Dashboard writes (start/stop, Xdebug) are POST requests that require the `X-Devstack: 1` header and only ever call the
 `bin/` commands above with allow-listed arguments, so another website open in your browser cannot trigger them.

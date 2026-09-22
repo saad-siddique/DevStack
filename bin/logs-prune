@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# logs-prune [--max-size 100M] [--dry-run] [--json]
+# Daily rotation for every stack log: current -> .1 (yesterday), .1 dropped. Nothing older than 48 h survives.
+# Writers keep appending (copy + truncate); the root-owned nginx log is renamed and nginx reopened.
+# Also runs from the dashboard's rotation job (LaunchAgent, 04:00) — see bootstrap.sh ensure_log_pruning.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+MAX_SIZE="100M"; DRY=0; JSON=0
+while [ $# -gt 0 ]; do
+	case "$1" in --max-size) MAX_SIZE="$2"; shift ;; --dry-run) DRY=1 ;; --json) JSON=1 ;; *) die "unknown argument $1" ;; esac; shift
+done
+to_bytes() { case "$1" in *G) echo $(( ${1%G} * 1024 * 1024 * 1024 )) ;; *M) echo $(( ${1%M} * 1024 * 1024 )) ;; *K) echo $(( ${1%K} * 1024 )) ;; *) echo "$1" ;; esac; }
+MAX_BYTES="$(to_bytes "$MAX_SIZE")"
+
+VALET_LOG="$VALET_HOME/Log"; BREW_LOG="$BREW_PREFIX/var/log"
+targets=("$VALET_LOG/nginx-error.log" "$VALET_LOG/php-fpm.log" "$BREW_LOG/php-fpm.log" "$BREW_LOG/redis.log" "$BREW_LOG/mailpit.log" "$BREW_LOG/local-devstack-prune.log")
+for f in "$BREW_PREFIX"/var/mysql/*.err; do [ -f "$f" ] && targets+=("$f"); done
+for l in "$VALET_HOME"/Sites/*; do [ -L "$l" ] && t="$(readlink "$l")" && [ -f "$t/wp-content/debug.log" ] && targets+=("$t/wp-content/debug.log"); done
+for f in "$LOG_DIR"/*.log; do [ -f "$f" ] && targets+=("$f"); done
+
+rotated=(); skipped=(); restart_nginx=0; freed=0
+for f in "${targets[@]}"; do
+	[ -f "$f" ] || continue
+	size="$(stat -f '%z' "$f")"
+	if [ "$size" -eq 0 ]; then skipped+=("$f"); continue; fi
+	freed=$(( freed + size ))
+	if [ "1" = "$DRY" ]; then rotated+=("$f"); continue; fi
+	if [ -w "$f" ]; then
+		cp -p "$f" "$f.1" && truncate -s 0 "$f"          # writer holds the same inode, keeps appending at offset 0
+	else
+		mv "$f" "$f.1" && : > "$f"                        # root-owned (nginx): new inode, nginx must reopen
+		case "$f" in *nginx*) restart_nginx=1 ;; esac
+	fi
+	rotated+=("$f")
+done
+[ "1" = "$DRY" ] || { [ "$restart_nginx" = 1 ] && "$REPO_DIR/bin/service" nginx restart > /dev/null 2>&1 || true; }
+
+# Anything rotated more than 48 h ago is gone, and .1 files never grow past the cap either.
+dropped=()
+for f in "${targets[@]}"; do
+	[ -f "$f.1" ] || continue
+	age_h=$(( ( $(date +%s) - $(stat -f '%m' "$f.1") ) / 3600 ))
+	if [ "$age_h" -ge 48 ]; then [ "1" = "$DRY" ] || rm -f "$f.1"; dropped+=("$f.1"); fi
+done
+# Size guard for the live files (run this hourly if a log explodes mid-day): rotate immediately when over the cap.
+for f in "${targets[@]}"; do
+	[ -f "$f" ] && [ "$(stat -f '%z' "$f")" -gt "$MAX_BYTES" ] && [ "1" != "$DRY" ] && { cp -p "$f" "$f.1" 2> /dev/null && truncate -s 0 "$f" 2> /dev/null || true; }
+done
+
+to_json_array() { printf '%s\n' "$@" | jq -R . | jq -s 'map(select(. != ""))'; }
+report="$(jq -n --arg when "$(date -Iseconds)" --argjson dry "$([ "1" = "$DRY" ] && echo true || echo false)" --argjson bytes "$freed" \
+	--argjson rotated "$(to_json_array "${rotated[@]+"${rotated[@]}"}")" --argjson dropped "$(to_json_array "${dropped[@]+"${dropped[@]}"}")" --argjson skipped "$(to_json_array "${skipped[@]+"${skipped[@]}"}")" \
+	'{when:$when,dry_run:$dry,rotated:$rotated,dropped:$dropped,skipped_empty:$skipped,bytes_rotated:$bytes}')"
+if [ "1" = "$JSON" ]; then echo "$report"; else echo "$report" | jq -r '"\(.when) rotated \(.rotated|length) logs (\(.bytes_rotated) bytes), dropped \(.dropped|length) old .1 files\(if .dry_run then " [dry-run]" else "" end)"'; fi

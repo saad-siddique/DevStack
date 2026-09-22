@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# logs list [--json]                     : every known log with path, size, age
+# logs <source> [-n 200] [--json]         : tail one log; lines carry a severity (error|warn|notice|info)
+# logs wp <site> [-n 200] [--json]        : a site's wp-content/debug.log
+# logs crashes [--hours 48] [--json]      : macOS crash reports for stack processes (php-fpm, nginx, mysqld, ...)
+# logs clear <source|wp <site>>           : truncate one log (its writer keeps appending; nginx is restarted)
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+VALET_LOG="$VALET_HOME/Log"; BREW_LOG="$BREW_PREFIX/var/log"
+JSON=0; N=200; HOURS=48; ARGS=()
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--json) JSON=1 ;; -n) N="$2"; shift ;; -n=*) N="${1#-n=}" ;; --hours) HOURS="$2"; shift ;;
+		--*) die "unknown flag $1" ;; *) ARGS+=("$1") ;;
+	esac
+	shift
+done
+CMD="${ARGS[0]:-list}"
+
+# log_path <source> [site] : print the file for a source, or nothing.
+log_path() {
+	case "$1" in
+		nginx)   echo "$VALET_LOG/nginx-error.log" ;;
+		php)     echo "$VALET_LOG/php-fpm.log" ;;                 # PHP errors from every version (Valet's error_log.ini)
+		php-fpm) echo "$BREW_LOG/php-fpm.log" ;;                  # php-fpm master: workers exiting on signals, pool start/stop
+		mysql)   ls -t "$BREW_PREFIX"/var/mysql/*.err 2> /dev/null | head -1 ;;
+		redis)   echo "$BREW_LOG/redis.log" ;;
+		mailpit) echo "$BREW_LOG/mailpit.log" ;;
+		prune)   echo "$BREW_LOG/local-devstack-prune.log" ;;
+		wp)      local t; t="$(readlink "$VALET_HOME/Sites/$2" 2> /dev/null || true)"; [ -n "$t" ] && echo "$t/wp-content/debug.log" ;;
+	esac
+}
+SOURCES=(nginx php php-fpm mysql redis mailpit prune)
+
+severity() {
+	# severity <line> : crude but predictable classification for colouring.
+	case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+		*"fatal"*|*"[error]"*|*"[crit]"*|*"[emerg]"*|*"[alert]"*|*"php error"*|*"error:"*|*"[error"*|*"segfault"*|*"sigabrt"*|*"sigsegv"*|*"exited on signal"*) echo error ;;
+		*"warn"*|*"deprecated"*) echo warn ;;
+		*"notice"*|*"[info]"*) echo notice ;;
+		*) echo info ;;
+	esac
+}
+
+file_meta() {
+	# file_meta <path> -> size bytes, mtime epoch (0 0 when missing)
+	if [ -f "$1" ]; then stat -f '%z %m' "$1"; else echo "0 0"; fi
+}
+
+case "$CMD" in
+	list)
+		rows="$({ for s in "${SOURCES[@]}"; do
+			p="$(log_path "$s")"; read -r size mtime <<<"$(file_meta "$p")"
+			jq -n --arg s "$s" --arg p "${p:-}" --argjson size "$size" --argjson mtime "$mtime" --argjson exists "$([ -f "$p" ] && echo true || echo false)" '{source:$s,path:$p,size:$size,mtime:$mtime,exists:$exists}'
+		done
+		for l in "$VALET_HOME"/Sites/*; do
+			[ -L "$l" ] || continue; site="$(basename "$l")"; p="$(log_path wp "$site")"
+			[ -f "$(readlink "$l")/wp-config.php" ] || continue
+			read -r size mtime <<<"$(file_meta "$p")"
+			jq -n --arg s "wp $site" --arg site "$site" --arg p "$p" --argjson size "$size" --argjson mtime "$mtime" --argjson exists "$([ -f "$p" ] && echo true || echo false)" '{source:$s,site:$site,path:$p,size:$size,mtime:$mtime,exists:$exists}'
+		done; } | jq -s .)"
+		if [ "1" = "$JSON" ]; then echo "$rows"; else echo "$rows" | jq -r '.[] | "\(.source)\t\(.size)\t\(.path)"' | column -t -s $'\t'; fi ;;
+
+	crashes)
+		procs='^(php-fpm|php|nginx|mysqld|redis-server|memcached|mailpit|dnsmasq)$'   # php-cgi was MAMP's; not watched
+		rows="$(find /Library/Logs/DiagnosticReports "$HOME/Library/Logs/DiagnosticReports" -name '*.ips' -mmin "-$((HOURS * 60))" 2> /dev/null | while read -r f; do
+			proc="$(head -1 "$f" | jq -r '.procName // .name // empty' 2> /dev/null)"
+			[ -n "$proc" ] || proc="$(basename "$f" | sed -E 's/-[0-9]{4}-.*//')"
+			printf '%s\n' "$proc" | /usr/bin/grep -qE "$procs" || continue
+			ts="$(head -1 "$f" | jq -r '.timestamp // empty' 2> /dev/null)"
+			reason="$(sed -n '2,$p' "$f" | jq -r '.termination | "\(.namespace // "") \(.indicator // .reasons[0]? // "")"' 2> /dev/null | head -1 | xargs)"
+			jq -n --arg f "$f" --arg proc "$proc" --arg ts "$ts" --arg reason "$reason" '{process:$proc,time:$ts,reason:$reason,file:$f}'
+		done | jq -s 'sort_by(.time) | reverse')"
+		if [ "1" = "$JSON" ]; then jq -n --argjson rows "$rows" --argjson hours "$HOURS" '{hours:$hours,count:($rows|length),reports:$rows}'; else echo "$rows" | jq -r '.[] | "\(.time)  \(.process)  \(.reason)"'; [ "$(echo "$rows" | jq length)" -gt 0 ] || echo "no stack crash reports in the last $HOURS h"; fi ;;
+
+	clear)
+		src="${ARGS[1]:-}"; [ -n "$src" ] || die "usage: logs clear <source> | logs clear wp <site>"
+		if [ "wp" = "$src" ]; then p="$(log_path wp "${ARGS[2]:-}")"; else p="$(log_path "$src")"; fi
+		[ -n "$p" ] || die "unknown source '$src'"
+		if [ -f "$p" ] && [ ! -w "$p" ]; then
+			# root-owned (nginx writes it): replace the file, then let nginx reopen it.
+			mv "$p" "$p.cleared" && : > "$p" && rm -f "$p.cleared"
+			[ "nginx" = "$src" ] && "$REPO_DIR/bin/service" nginx restart > /dev/null
+		else
+			: > "$p"
+		fi
+		log "cleared $p" ;;
+
+	*)
+		if [ "wp" = "$CMD" ]; then site="${ARGS[1]:-}"; [ -n "$site" ] || die "usage: logs wp <site>"; p="$(log_path wp "$site")"; label="wp $site"; else p="$(log_path "$CMD")"; label="$CMD"; fi
+		[ -n "$p" ] || die "unknown source '$CMD' (sources: ${SOURCES[*]}, wp <site>, crashes, list)"
+		read -r size mtime <<<"$(file_meta "$p")"
+		if [ "1" = "$JSON" ]; then
+			lines="$( { [ -f "$p" ] && tail -n "$N" "$p" || true; } | while IFS= read -r line; do jq -n --arg t "$line" --arg sev "$(severity "$line")" '{level:$sev,text:$t}'; done | jq -s .)"
+			jq -n --arg s "$label" --arg p "$p" --argjson size "$size" --argjson mtime "$mtime" --argjson lines "$lines" '{source:$s,path:$p,size:$size,mtime:$mtime,lines:$lines}'
+		else
+			[ -f "$p" ] && tail -n "$N" "$p" || echo "(no log yet at $p)"
+		fi ;;
+esac

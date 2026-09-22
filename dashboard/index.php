@@ -65,12 +65,51 @@ if ( '' !== $api ) {
 		}
 		list( , $xout )   = devstack_run( array( $repo_bin . '/php-xdebug', 'status', '--json' ), $home );
 		$status['xdebug'] = json_decode( $xout, true ) ?: array();
+		list( , $cout )    = devstack_run( array( $repo_bin . '/logs', 'crashes', '--hours', '24', '--json' ), $home );
+		$status['crashes'] = json_decode( $cout, true ) ?: array( 'hours' => 24, 'count' => 0, 'reports' => array() );
+		list( , $lout )    = devstack_run( array( $repo_bin . '/logs', 'list', '--json' ), $home );
+		$status['logs']    = json_decode( $lout, true ) ?: array();
 		$status['tools']  = array(
 			'phpmyadmin' => 'https://phpmyadmin.test',
 			'mailpit'    => 'http://localhost:8025',
 		);
 		$status['sites_dir'] = $home . '/Sites';
 		devstack_json( 200, $status );
+	}
+
+	if ( 'log' === $api && ! $is_write ) {
+		$source = (string) ( $_GET['source'] ?? '' );
+		$site   = (string) ( $_GET['site'] ?? '' );
+		$n      = (string) max( 20, min( 1000, (int) ( $_GET['n'] ?? 200 ) ) );
+		$argv   = array( $repo_bin . '/logs' );
+		if ( 'wp' === $source ) {
+			if ( ! preg_match( '/^[a-z0-9][a-z0-9-]*$/', $site ) ) {
+				devstack_json( 400, array( 'error' => 'Bad site name.' ) );
+			}
+			array_push( $argv, 'wp', $site );
+		} elseif ( in_array( $source, array( 'nginx', 'php', 'php-fpm', 'mysql', 'redis', 'mailpit', 'prune' ), true ) ) {
+			$argv[] = $source;
+		} else {
+			devstack_json( 400, array( 'error' => 'Unknown log source.' ) );
+		}
+		array_push( $argv, '-n', $n, '--json' );
+		list( $code, $out ) = devstack_run( $argv, $home );
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => 'logs failed' ) );
+	}
+
+	if ( 'log-clear' === $api && $is_write ) {
+		$source = (string) ( $_POST['source'] ?? '' );
+		$site   = (string) ( $_POST['site'] ?? '' );
+		$argv   = array( $repo_bin . '/logs', 'clear' );
+		if ( 'wp' === $source && preg_match( '/^[a-z0-9][a-z0-9-]*$/', $site ) ) {
+			array_push( $argv, 'wp', $site );
+		} elseif ( in_array( $source, array( 'nginx', 'php', 'php-fpm', 'mysql', 'redis', 'mailpit', 'prune' ), true ) ) {
+			$argv[] = $source;
+		} else {
+			devstack_json( 400, array( 'error' => 'Unknown log source.' ) );
+		}
+		list( $code, , $err ) = devstack_run( $argv, $home );
+		devstack_json( 0 === $code ? 200 : 500, array( 'cleared' => 0 === $code, 'error' => 0 === $code ? null : trim( $err ) ) );
 	}
 
 	if ( 'service' === $api && $is_write ) {
@@ -118,6 +157,7 @@ header( 'Cache-Control: no-store' );
 <header class="masthead">
 	<h1>local-devstack</h1>
 	<p class="summary" id="summary" aria-live="polite">Reading the stack…</p>
+	<p class="alert" id="alert" hidden role="status"></p>
 	<span class="pulse" id="pulse" title="Live" aria-hidden="true"></span>
 </header>
 
@@ -143,6 +183,20 @@ header( 'Cache-Control: no-store' );
 			<h2 id="tools-h">Tools</h2>
 		</div>
 		<ul class="tools" id="tools"></ul>
+	</section>
+
+	<section class="panel" aria-labelledby="logs-h">
+		<div class="panel-head">
+			<h2 id="logs-h">Logs</h2>
+			<p class="hint">Rotated daily at 04:00; today and yesterday are kept, nothing older than 48 hours.</p>
+		</div>
+		<div class="log-tabs" id="log-tabs" role="tablist"></div>
+		<div class="log-tools">
+			<label class="filter"><span class="visually-hidden">Filter log lines</span><input type="search" id="log-filter" placeholder="Filter lines" autocomplete="off"></label>
+			<span class="log-meta" id="log-meta"></span>
+			<button class="act quiet" type="button" id="log-clear">Clear this log</button>
+		</div>
+		<pre class="log" id="log-body" tabindex="0" aria-live="off"></pre>
 	</section>
 
 	<section class="panel" aria-labelledby="sites-h">

@@ -214,6 +214,37 @@ ensure_services() {
 	fi
 }
 
+# Daily log rotation at 04:00 via a user LaunchAgent (no sudo: nginx's root-owned log is renamed and nginx
+# restarted through the trusted brew path). Keeps today + yesterday, so nothing older than 48 h survives.
+ensure_log_pruning() {
+	log "Log rotation"
+	local label="com.local-devstack.logs-prune" plist="$HOME/Library/LaunchAgents/com.local-devstack.logs-prune.plist" tmp
+	mkdir -p "$HOME/Library/LaunchAgents" "$BREW_PREFIX/var/log"
+	tmp="$(mktemp)"
+	cat > "$tmp" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+	<key>Label</key><string>$label</string>
+	<key>ProgramArguments</key><array><string>/bin/bash</string><string>$REPO_DIR/bin/logs-prune</string></array>
+	<key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+	<key>RunAtLoad</key><false/>
+	<key>StandardOutPath</key><string>$BREW_PREFIX/var/log/local-devstack-prune.log</string>
+	<key>StandardErrorPath</key><string>$BREW_PREFIX/var/log/local-devstack-prune.log</string>
+	<key>EnvironmentVariables</key><dict><key>PATH</key><string>$BREW_PREFIX/bin:$BREW_PREFIX/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>HOME</key><string>$HOME</string></dict>
+</dict></plist>
+PLIST
+	if ! cmp -s "$tmp" "$plist"; then
+		launchctl bootout "gui/$(id -u)/$label" > /dev/null 2>&1 || true
+		mv "$tmp" "$plist"
+		launchctl bootstrap "gui/$(id -u)" "$plist" && ok "LaunchAgent installed: rotates logs daily at 04:00"
+	else
+		rm -f "$tmp"
+		launchctl print "gui/$(id -u)/$label" > /dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$plist"
+		ok "LaunchAgent present: rotates logs daily at 04:00"
+	fi
+}
+
 ensure_dashboard() {
 	log "Dashboard"
 	if [ ! -L "$VALET_HOME/Sites/dashboard" ]; then
@@ -234,4 +265,5 @@ ensure_valet
 ensure_services
 ensure_dashboard
 ensure_phpmyadmin
+ensure_log_pruning
 log "Done. Next: bin/migrate-site <host>  (pilot: cleantest, clean-automator)"
