@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# stack-upgrade --check | --auto | --all | --nightly | --set-auto off|patch|all [--json]
+# Homebrew upgrades for the stack's own formulae (everything in the Brewfile), classified by version distance:
+#   patch  x.y.Z changed  -> security/bug-fix releases; --auto applies these
+#   minor/major           -> --all applies them too (the "Upgrade all" button in the app/dashboard)
+# --nightly (the 03:30 LaunchAgent) obeys the developer's choice in $DATA_DIR/settings.json: "off" (default) only
+# checks and reports, "patch" applies patch releases, "all" applies everything. --set-auto stores that choice.
+# Affected services are restarted after an upgrade. Every run writes $DATA_DIR/upgrades.json, which stack-status
+# embeds as "upgrades" so the dashboard and the app show what happened and what is waiting.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+MODE="" ; JSON=0 ; SET_AUTO=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--check|--auto|--all|--nightly) MODE="${1#--}" ;; --json) JSON=1 ;;
+		--set-auto) SET_AUTO="$2"; shift ;; --set-auto=*) SET_AUTO="${1#--set-auto=}" ;;
+		*) die "usage: stack-upgrade --check|--auto|--all|--nightly | --set-auto off|patch|all [--json]" ;;
+	esac
+	shift
+done
+STATE="$DATA_DIR/upgrades.json"; SETTINGS="$DATA_DIR/settings.json"; mkdir -p "$DATA_DIR" "$LOG_DIR"
+auto_setting() { jq -r '.auto_upgrade // "off"' "$SETTINGS" 2> /dev/null || echo off; }
+
+if [ -n "$SET_AUTO" ]; then
+	case "$SET_AUTO" in off|patch|all) ;; *) die "--set-auto takes off, patch or all" ;; esac
+	if [ -f "$SETTINGS" ]; then jq --arg v "$SET_AUTO" '.auto_upgrade = $v' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+	else jq -n --arg v "$SET_AUTO" '{auto_upgrade:$v}' > "$SETTINGS"; fi
+	if [ "1" = "$JSON" ]; then jq '. + {ok:true}' "$SETTINGS"; else echo "nightly upgrades: $SET_AUTO"; fi
+	[ -n "$MODE" ] || exit 0
+fi
+[ -n "$MODE" ] || die "usage: stack-upgrade --check|--auto|--all|--nightly | --set-auto off|patch|all [--json]"
+if [ "nightly" = "$MODE" ]; then
+	case "$(auto_setting)" in patch) MODE=auto ;; all) MODE=all ;; *) MODE=check ;; esac
+fi
+exec 2> >(tee -a "$LOG_DIR/stack-upgrade.log" >&2)
+log "=== stack-upgrade --$MODE (nightly setting: $(auto_setting))"
+
+# Our formulae: every `brew "…"` in the Brewfile, matched by short name (brew outdated prints tap-qualified names).
+OURS=(); while IFS= read -r l; do OURS+=("$l"); done < <(sed -nE 's/^brew "([^"]+)".*/\1/p' "$REPO_DIR/Brewfile" | awk -F/ '{print $NF}' | sort -u)
+ours_has() { printf '%s\n' "${OURS[@]}" | /usr/bin/grep -qx -- "$1"; }
+
+# kind <installed> <current> : patch | minor | major (revision suffixes like _1 ignored).
+kind() {
+	local a b; a="${1%%_*}"; b="${2%%_*}"
+	local a1 a2 b1 b2; a1="${a%%.*}"; b1="${b%%.*}"; a2="$(cut -d. -f2 <<<"$a")"; b2="$(cut -d. -f2 <<<"$b")"
+	if [ "$a1" != "$b1" ]; then echo major; elif [ "$a2" != "$b2" ]; then echo minor; else echo patch; fi
+}
+
+log "brew update"
+"$BREW_PREFIX/bin/brew" update -q > /dev/null 2>&1 || log "warning: brew update failed (offline?), classifying against the local tap state"
+available="$("$BREW_PREFIX/bin/brew" outdated --json=v2 --formula 2> /dev/null | jq -c '.formulae[] | {name, installed: .installed_versions[-1], current: .current_version, pinned}' \
+	| while IFS= read -r row; do
+		full="$(jq -r .name <<<"$row")"; short="${full##*/}"
+		ours_has "$short" || continue
+		inst="$(jq -r .installed <<<"$row")"; cur="$(jq -r .current <<<"$row")"
+		jq -c --arg short "$short" --arg kind "$(kind "$inst" "$cur")" '. + {short:$short, kind:$kind}' <<<"$row"
+	done | jq -s '.')"
+n_avail="$(jq length <<<"$available")"
+log "outdated stack formulae: $n_avail"
+
+# service_for <short formula> : which stack service must restart after this upgrade (empty = none).
+service_for() {
+	case "$1" in
+		php|php@*) echo "$1" ;;
+		xdebug@*|redis@*|imagick@*|memcached@*) echo "php@${1#*@}" ;;   # PHP extensions -> that version's php-fpm
+		mysql@8.4|redis|memcached|mailpit|nginx|dnsmasq) echo "$1" ;;
+		*) echo "" ;;
+	esac
+}
+is_running() {
+	{ sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; } \
+		| jq -e --arg n "$1" 'add | map(select(.name == $n and .status == "started")) | length > 0' > /dev/null 2>&1
+}
+
+last_run=null
+if [ "check" != "$MODE" ]; then
+	if [ "auto" = "$MODE" ]; then todo="$(jq -c '[.[] | select(.kind == "patch" and .pinned != true)]' <<<"$available")"; else todo="$(jq -c '[.[] | select(.pinned != true)]' <<<"$available")"; fi
+	upgraded='[]'; failed='[]'; restart=()
+	while IFS= read -r row; do
+		[ -n "$row" ] || continue
+		full="$(jq -r .name <<<"$row")"; short="$(jq -r .short <<<"$row")"; from="$(jq -r .installed <<<"$row")"; to="$(jq -r .current <<<"$row")"
+		log "brew upgrade $full ($from -> $to)"
+		if "$BREW_PREFIX/bin/brew" upgrade "$full" > /dev/null 2> >(tail -3 >&2); then
+			upgraded="$(jq -c --arg n "$short" --arg f "$from" --arg t "$to" '. + [{name:$n,from:$f,to:$t}]' <<<"$upgraded")"
+			svc="$(service_for "$short")"; [ -n "$svc" ] && restart+=("$svc")
+		else
+			failed="$(jq -c --arg n "$short" --arg e "brew upgrade $full failed" '. + [{name:$n,error:$e}]' <<<"$failed")"
+		fi
+	done < <(jq -c '.[]' <<<"$todo")
+	# A PHP upgrade keeps etc/php/<v> but can drop the CLI link; make sure the default stays linked and ini drop-ins are present.
+	if jq -e '.[] | select(.name | startswith("php"))' <<<"$upgraded" > /dev/null; then
+		"$BREW_PREFIX/bin/brew" link --force --overwrite "$DEFAULT_PHP" > /dev/null 2>&1 || true
+		for d in "$BREW_PREFIX"/etc/php/*/conf.d; do cmp -s "$REPO_DIR/php/zz-uo-dev.ini" "$d/zz-uo-dev.ini" || cp "$REPO_DIR/php/zz-uo-dev.ini" "$d/zz-uo-dev.ini"; done
+	fi
+	restarted='[]'
+	for svc in $(printf '%s\n' "${restart[@]+"${restart[@]}"}" | sort -u); do
+		[ -n "$svc" ] || continue
+		# php@8.5 is Homebrew's `php` formula; bin/service maps the name, brew services knows it as "php".
+		formula="$svc"; case "$svc" in php@*) [ -d "$BREW_PREFIX/opt/$svc" ] || formula="php" ;; esac
+		if is_running "$formula"; then
+			if "$REPO_DIR/bin/service" "$svc" restart > /dev/null 2>&1; then restarted="$(jq -c --arg s "$svc" '. + [$s]' <<<"$restarted")"; log "restarted $svc"
+			else failed="$(jq -c --arg n "$svc" --arg e "restart failed" '. + [{name:$n,error:$e}]' <<<"$failed")"; log "warning: could not restart $svc"; fi
+		fi
+	done
+	last_run="$(jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg mode "$MODE" --argjson up "$upgraded" --argjson rs "$restarted" --argjson f "$failed" \
+		'{at:$at,mode:$mode,upgraded:$up,restarted:$rs,failed:$f}')"
+	# What is still outdated after applying.
+	available="$("$BREW_PREFIX/bin/brew" outdated --json=v2 --formula 2> /dev/null | jq -c '.formulae[] | {name, installed: .installed_versions[-1], current: .current_version, pinned}' \
+		| while IFS= read -r row; do
+			full="$(jq -r .name <<<"$row")"; short="${full##*/}"; ours_has "$short" || continue
+			inst="$(jq -r .installed <<<"$row")"; cur="$(jq -r .current <<<"$row")"
+			jq -c --arg short "$short" --arg kind "$(kind "$inst" "$cur")" '. + {short:$short, kind:$kind}' <<<"$row"
+		done | jq -s '.')"
+	log "upgraded $(jq length <<<"$upgraded"), failed $(jq length <<<"$failed"), still outdated $(jq length <<<"$available")"
+fi
+
+# Keep the previous run's record when this was only a check.
+prev_run="$(jq -c '.last_run // null' "$STATE" 2> /dev/null || echo null)"
+[ "null" != "$last_run" ] || last_run="$prev_run"
+jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson av "$available" --argjson lr "$last_run" --arg auto "$(auto_setting)" \
+	'{checked_at:$at, available:$av, last_run:$lr, auto:$auto}' > "$STATE"
+
+if [ "1" = "$JSON" ]; then
+	jq '. + {ok:true}' "$STATE"
+else
+	jq -r '"nightly: " + (.auto | if . == "off" then "check and report only" elif . == "patch" then "apply patch releases" else "apply everything" end),
+	       (.available | if length == 0 then "stack up to date" else "outdated: " + (map("\(.short) \(.installed) -> \(.current) (\(.kind))") | join(", ")) end),
+	       (.last_run | if . == null then empty else "last run \(.at) (\(.mode)): upgraded \(.upgraded | map("\(.name) \(.from)->\(.to)") | join(", ") | if . == "" then "nothing" else . end)" + (if (.failed|length) > 0 then "; FAILED " + (.failed | map(.name) | join(", ")) else "" end) end)' "$STATE"
+fi

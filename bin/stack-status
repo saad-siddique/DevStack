@@ -69,5 +69,8 @@ elif t="$(curl -s -m 1 'http://localhost:8025/mailhog/api/v2/messages?limit=1' |
 	mail_json="$(jq -n --argjson t "$t" '{backend:"mailhog",total:$t}')"
 fi
 
-jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" \
-	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail}'
+# Homebrew upgrade state written by bin/stack-upgrade (nightly --auto, or on demand); no network here.
+upgrades="$(jq -c '.' "$DATA_DIR/upgrades.json" 2> /dev/null || echo null)"
+
+jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" --argjson upgrades "$upgrades" \
+	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail, upgrades:$upgrades}'

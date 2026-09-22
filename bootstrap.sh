@@ -259,6 +259,37 @@ PLIST
 	fi
 }
 
+# Nightly Homebrew check of the stack (bin/stack-upgrade --nightly) at 03:30. By default it only reports what is
+# outdated (app + dashboard show it with Upgrade buttons); `devstack upgrade --set-auto patch` makes it apply patch
+# releases unattended. Missed runs (Mac asleep) fire once on wake.
+ensure_stack_upgrades() {
+	log "Nightly stack upgrades"
+	local label="com.devstack.upgrade" plist="$HOME/Library/LaunchAgents/com.devstack.upgrade.plist" tmp
+	tmp="$(mktemp)"
+	cat > "$tmp" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+	<key>Label</key><string>$label</string>
+	<key>ProgramArguments</key><array><string>/bin/bash</string><string>$REPO_DIR/bin/stack-upgrade</string><string>--nightly</string><string>--json</string></array>
+	<key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>
+	<key>RunAtLoad</key><false/>
+	<key>StandardOutPath</key><string>$BREW_PREFIX/var/log/devstack-upgrade.log</string>
+	<key>StandardErrorPath</key><string>$BREW_PREFIX/var/log/devstack-upgrade.log</string>
+	<key>EnvironmentVariables</key><dict><key>PATH</key><string>$BREW_PREFIX/bin:$BREW_PREFIX/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>HOME</key><string>$HOME</string><key>HOMEBREW_NO_AUTO_UPDATE</key><string>1</string><key>HOMEBREW_NO_ENV_HINTS</key><string>1</string></dict>
+</dict></plist>
+PLIST
+	if ! cmp -s "$tmp" "$plist"; then
+		launchctl bootout "gui/$(id -u)/$label" > /dev/null 2>&1 || true
+		mv "$tmp" "$plist"
+		launchctl bootstrap "gui/$(id -u)" "$plist" && ok "LaunchAgent installed: nightly stack check at 03:30 (devstack upgrade --set-auto patch to apply)"
+	else
+		rm -f "$tmp"
+		launchctl print "gui/$(id -u)/$label" > /dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$plist"
+		ok "LaunchAgent present: nightly stack check at 03:30"
+	fi
+}
+
 # The global `devstack` command (bin/devstack) and its zsh completion. A symlink, so `git pull` updates it.
 ensure_cli() {
 	log "devstack command"
@@ -289,6 +320,7 @@ ensure_services
 ensure_dashboard
 ensure_phpmyadmin
 ensure_log_pruning
+ensure_stack_upgrades
 ensure_cli
 if [ "1" = "$WITH_APP" ]; then log "Menu-bar app"; "$REPO_DIR/bin/app" install; fi
 log "Done. devstack help lists every command; devstack app install builds the menu-bar app."

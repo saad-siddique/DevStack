@@ -54,21 +54,23 @@ cd ~/Work/DevStack
 7. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`.
 8. With `--app`: builds `DevStack.app`, installs it into `/Applications` and starts it.
 
-When it finishes, **DevStack.app is in `/Applications` and already running**: look for the server-rack icon in the
-menu bar, top right, next to the clock. Everything below can be done from that icon. Open a new terminal only if
+When it finishes, **DevStack.app is in `/Applications` and already running**: look for the stacked-layers DevStack
+icon in the menu bar, top right, next to the clock. Everything below can be done from that icon. Open a new terminal only if
 you also want the `devstack` command on your PATH.
 
 ## Using the app
 
 **Where it is.** `/Applications/DevStack.app`. It has no Dock icon and no main window; it lives in the menu bar as
-a server-rack icon and opens a panel when clicked. Turn on *Start at login* in the panel's ⋯ menu and it will always
+the stacked-layers icon (the same glyph as the app icon and the dashboard's tab icon) and opens a panel when clicked. Turn on *Start at login* in the panel's ⋯ menu and it will always
 be there. If the icon is missing, `devstack app open` starts it; `devstack app install` rebuilds it after an update.
-The icon changes to a warning triangle when a core service is down or launchd reports an error.
+The icon gains an exclamation badge when a core service is down or launchd reports an error.
 
 **The panel**, top to bottom:
 
 - Header: how many services are online, how many sites, the default PHP version; a refresh button and the ⋯ menu
-  (dashboard, repo and Sites folders, Start at login, Quit).
+  (dashboard, repo and Sites folders, Start at login, update checks, the nightly-upgrade switch, Quit).
+- Notices, when there are any: **Update available** for this repo, and the **stack upgrades** line (see *Keeping
+  the stack current* below) with what Homebrew changed overnight and what is waiting, each with its button.
 - Quick-open: **Dashboard** (`https://dashboard.test`), **phpMyAdmin** (every database, signed in as root) and
   **Mailpit** with the count of caught mails.
 - **Stack load**: CPU and memory of the stack's own processes (php-fpm, nginx, mysqld, redis, memcached, mailpit,
@@ -114,6 +116,7 @@ renders every window to `docs/img/*.png` with made-up site names.
 |---|---|
 | The app | `/Applications/DevStack.app`, built from `app/` |
 | Site files | `~/Sites/<name>` (`SITES_DIR=…` in your shell to use another folder) |
+| Settings and state | `~/.local/share/devstack/` (`settings.json` for the nightly-upgrade choice, `upgrades.json` for the last check) |
 | Valet state | `~/.config/valet`: `Sites/` links, `Nginx/` per-site confs, `Certificates/`, `Log/` |
 | Databases | `/opt/homebrew/var/mysql`; per site one `wp_<name>` schema and a `wp_<name>` user, `DB_HOST 127.0.0.1` |
 | PHP settings | `/opt/homebrew/etc/php/<v>/php.ini` is never edited; overrides live in `conf.d/zz-uo-dev.ini` |
@@ -232,13 +235,48 @@ new name. `devstack remove --backup` refuses to delete anything when the backup 
 - Dashboard writes (start/stop, Xdebug) are POST requests that require the `X-Devstack: 1` header and only call the
   `bin/` commands with allow-listed arguments, so another website open in your browser cannot trigger them.
 
+## Keeping the stack current
+
+Two different things update, and both are prompts by default.
+
+**The stack itself (Homebrew formulae: PHP, MySQL, nginx, Redis, Mailpit, extensions).** A LaunchAgent,
+`com.devstack.upgrade`, runs `devstack upgrade --nightly` at 03:30 (or on the next wake). It runs `brew update`,
+lists the outdated stack formulae and sorts them by version distance: **patch** releases (`x.y.Z`, the security and
+bug-fix line) and **minor/major** releases. By default it changes nothing and only reports. The report shows up in
+the app's panel and on the dashboard's Overview:
+
+- *Upgraded today at 03:31: php@8.4 8.4.25 → 8.4.26, mailpit …* after a run that applied something.
+- *N upgrades to review: redis 8.10.2 → 8.12.0* with an **Upgrade all** button.
+- *N patch releases available* with an **Upgrade** button.
+
+![Stack upgrades in the panel](docs/img/panel-upgrades.png)
+
+If you would rather not wait, tick **Apply patch upgrades nightly** in the app's ⋯ menu (or the checkbox on the
+dashboard). From then on the 03:30 run applies patch releases unattended, restarts the services that changed, and
+reports what it did the next morning. Minor and major releases are never applied unattended; they can change
+behaviour, and a `php` formula jump would move PHP 8.5 out from under sites. From the terminal:
+
+```bash
+devstack upgrade --check            # brew update + report (what the nightly run does by default)
+devstack upgrade --auto             # apply patch releases now, restart what changed
+devstack upgrade --all              # apply everything outdated, restart what changed
+devstack upgrade --set-auto patch   # let the nightly run apply patch releases (off | patch | all)
+devstack logs upgrade               # what the nightly run did
+```
+
+**This repo (scripts, dashboard, app).** See below.
+
 ## Updating and uninstalling
 
 The app checks the repo's origin once every six hours (and 20 seconds after launch). When commits are waiting it
 shows an **Update available** line with the count and the newest commit; **Update** pulls, re-runs `bootstrap.sh`
 and streams the log into the task window. If `app/` changed, a **Rebuild and restart DevStack** button finishes the
 job. Nothing is ever applied without that click: an unattended pull could restart php-fpm under a debugging session
-or break every teammate at once on a bad push. From the terminal:
+or break every teammate at once on a bad push.
+
+![Update available](docs/img/panel-update.png)
+
+From the terminal:
 
 ```bash
 devstack update --check         # fetch and report (safe on a timer)
@@ -250,7 +288,7 @@ To remove DevStack (sites in `~/Sites` and databases under `/opt/homebrew/var/my
 
 ```bash
 devstack app uninstall
-launchctl bootout gui/$(id -u)/com.devstack.logs-prune; rm ~/Library/LaunchAgents/com.devstack.logs-prune.plist
+for a in logs-prune upgrade; do launchctl bootout gui/$(id -u)/com.devstack.$a; rm ~/Library/LaunchAgents/com.devstack.$a.plist; done
 valet uninstall --force         # nginx, dnsmasq, /etc/resolver/test, certificates
 brew services stop mysql@8.4 mailpit redis memcached
 rm /opt/homebrew/bin/devstack /opt/homebrew/share/zsh/site-functions/_devstack
@@ -266,9 +304,11 @@ drivers/              LocalValetDriver for subdirectory multisites
 mu-plugins/           uo-local-ssl.php (trust the local CA), uo-local-autologin.php (one-time login); .test hosts only
 dashboard/            dashboard.test (PHP + a little JS)
 bin/                  THE CONTRACT — devstack (dispatcher)  site-new  site-import  site-backup  site-login  site-remove
-                      php-xdebug  service  stack-status  logs  logs-prune  migrate-site  migrate-all  mamp-backout  app
+                      php-xdebug  service  stack-status  stack-upgrade  update  logs  logs-prune  migrate-site  migrate-all
+                      mamp-backout  app
 completions/          zsh completion for devstack
 app/                  DevStack.app: SwiftUI MenuBarExtra + Swift Charts, Swift Package; only ever runs `devstack …`
+                      Icon.svg is the single icon source (app icon, menu-bar template images, dashboard favicon)
 sites.tsv             MAMP migration inventory (host, folder, php, db, protected, notes) — yours, not ours
 docs/                 the MAMP-to-Valet handoff, build records (docs/superpowers/plans), screenshots (docs/img)
 ```

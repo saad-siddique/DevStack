@@ -20,6 +20,10 @@ struct PanelView: View {
 			if let u = state.update, u.isAvailable {
 				UpdateLine(info: u) { state.runUpdate() }.padding(.horizontal, 14).padding(.bottom, 8)
 			}
+			if let up = state.status?.upgrades, up.hasNews {
+				StackUpgradeLine(upgrades: up, upgradeAll: { state.runUpgrade(all: true) }, upgradePatches: { state.runUpgrade(all: false) })
+					.padding(.horizontal, 14).padding(.bottom, 8)
+			}
 			quickOpen.padding(.horizontal, 14).padding(.bottom, 10)
 			UsageChart(sampler: state.sampler).padding(.horizontal, 14)
 			Picker("Section", selection: $tab) {
@@ -66,6 +70,10 @@ struct PanelView: View {
 				Toggle("Start at login", isOn: Binding(get: { state.launchAtLogin }, set: { state.setLaunchAtLogin($0) }))
 				Button(state.checkingUpdates ? "Checking for updates…" : "Check for updates") { Task { await state.checkForUpdates() } }
 					.disabled(state.checkingUpdates)
+				Button(state.isBusy("upgrade-check") ? "Checking Homebrew…" : "Check Homebrew for stack upgrades") { Task { await state.checkUpgrades() } }
+					.disabled(state.isBusy("upgrade-check"))
+				Toggle("Apply patch upgrades nightly (03:30)", isOn: Binding(get: { state.status?.upgrades?.autoEnabled ?? false }, set: { on in Task { await state.setNightlyUpgrades(on) } }))
+					.disabled(state.isBusy("upgrade-auto") || state.status?.upgrades == nil)
 				Divider()
 				Button("Quit DevStack") { NSApp.terminate(nil) }
 			} label: {

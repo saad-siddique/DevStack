@@ -14,7 +14,7 @@ _devstack() {
 		'migrate:migrate one MAMP host' 'migrate-all:migrate every non-protected host'
 		'status:stack status JSON' 'service:start/stop/restart a service' 'xdebug:toggle Xdebug per PHP version'
 		'logs:tail stack logs' 'logs-prune:rotate logs now'
-		'bootstrap:(re)install the stack' 'update:git pull + bootstrap' 'app:menu-bar app' 'path:print repo dir' 'help:usage'
+		'bootstrap:(re)install the stack' 'update:git pull + bootstrap' 'upgrade:Homebrew upgrades of the stack' 'app:menu-bar app' 'path:print repo dir' 'help:usage'
 	)
 	if (( CURRENT == 2 )); then _describe 'command' cmds; return; fi
 	case $words[2] in
@@ -31,6 +31,7 @@ _devstack() {
 		app) local -a a; a=( build install open uninstall status ); _describe 'action' a ;;
 		bootstrap) _arguments '--app' ;;
 		update) _arguments '--check' '--app' '--json' ;;
+		upgrade) _arguments '--check' '--auto' '--all' '--nightly' '--set-auto:mode:(off patch all)' '--json' ;;
 	esac
 }
 _devstack "$@"

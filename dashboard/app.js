@@ -205,6 +205,7 @@
 		last = s;
 		$( 'summary' ).textContent = summary( s );
 		renderAlert( s );
+		renderUpgrades( s );
 		renderStrip( s );
 		renderServices( s );
 		renderPorts( s );
@@ -266,6 +267,45 @@
 		$( 'pulse' ).classList.toggle( 'stale', parts.length > 0 );
 		navDot( 'services', errs.length > 0 );
 		navDot( 'logs', crashes > 0 );
+	}
+
+	// Homebrew state of the stack (bin/stack-upgrade): what the nightly run did, what waits, and the nightly setting.
+	function renderUpgrades( s ) {
+		var box = $( 'upgrades' );
+		var u = s.upgrades;
+		box.textContent = '';
+		if ( ! u ) { box.hidden = true; return; }
+		var avail = u.available || [];
+		var review = avail.filter( function ( a ) { return 'patch' !== a.kind; } );
+		var patches = avail.filter( function ( a ) { return 'patch' === a.kind; } );
+		var run = u.last_run;
+		var recent = run && run.at && ( Date.now() - Date.parse( run.at ) ) < 86400000 && ( ( run.upgraded || [] ).length || ( run.failed || [] ).length );
+		var line = function ( a ) { return a.short + ' ' + a.installed + ' → ' + a.current; };
+		var rows = [];
+		if ( recent && ( run.upgraded || [] ).length ) {
+			rows.push( el( 'p', { 'class': 'ok', text: 'Upgraded ' + new Date( run.at ).toLocaleString( [], { hour: '2-digit', minute: '2-digit', weekday: 'short' } ) + ': ' + run.upgraded.map( function ( x ) { return x.name + ' ' + x.from + ' → ' + x.to; } ).join( ', ' ) } ) );
+		}
+		if ( recent && ( run.failed || [] ).length ) {
+			rows.push( el( 'p', { 'class': 'bad', text: 'Failed: ' + run.failed.map( function ( x ) { return x.name; } ).join( ', ' ) + ' — see the upgrade log.' } ) );
+		}
+		if ( review.length ) { rows.push( el( 'p', { text: review.length + ( 1 === review.length ? ' upgrade' : ' upgrades' ) + ' to review: ' + review.map( line ).join( ', ' ) } ) ); }
+		if ( patches.length ) { rows.push( el( 'p', { 'class': 'muted', text: patches.length + ( 1 === patches.length ? ' patch release' : ' patch releases' ) + ( 'off' === u.auto ? ' available: ' : ' apply tonight: ' ) + patches.map( line ).join( ', ' ) } ) ); }
+		if ( ! rows.length && u.checked_at ) { rows.push( el( 'p', { 'class': 'muted', text: 'Stack up to date (checked ' + new Date( u.checked_at ).toLocaleString( [], { hour: '2-digit', minute: '2-digit', weekday: 'short' } ) + ').' } ) ); }
+		var actions = el( 'div', { 'class': 'actions' } );
+		if ( review.length ) { actions.appendChild( button( 'Upgrade all', 'primary', function () { return post( 'upgrade', { mode: 'all' } ); } ) ); }
+		if ( patches.length ) { actions.appendChild( button( review.length ? 'Patches only' : 'Upgrade now', review.length ? '' : 'primary', function () { return post( 'upgrade', { mode: 'auto' } ); } ) ); }
+		actions.appendChild( button( 'Check now', 'quiet', function () { return post( 'upgrade', { mode: 'check' } ); } ) );
+		var auto = el( 'label', { 'class': 'auto' } );
+		var cb = el( 'input', { type: 'checkbox' } );
+		cb.checked = 'off' !== u.auto;
+		cb.addEventListener( 'change', function () { post( 'upgrade-auto', { value: cb.checked ? 'patch' : 'off' } ).then( refresh ); } );
+		auto.appendChild( cb );
+		auto.appendChild( document.createTextNode( ' Apply patch releases automatically at 03:30' ) );
+		actions.appendChild( auto );
+		box.appendChild( el( 'div', { 'class': 'text' }, rows ) );
+		box.appendChild( actions );
+		box.hidden = false;
+		navDot( 'overview', review.length > 0 || ( recent && ( run.failed || [] ).length > 0 ) );
 	}
 
 	function logKey( d ) { return d.source + ( d.site ? ':' + d.site : '' ); }

@@ -7,6 +7,7 @@ PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAM
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITES_DIR="${SITES_DIR:-$HOME/Sites}"
 SITES_TSV="${SITES_TSV:-$REPO_DIR/sites.tsv}"
+DATA_DIR="${DATA_DIR:-$HOME/.local/share/devstack}"   # phpMyAdmin, upgrades.json
 LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/DevStack}"   # command logs; migrate-site also parks its pre-migration dumps here
 VALET_HOME="${VALET_HOME:-$HOME/.config/valet}"
 BREW_PREFIX="${BREW_PREFIX:-$(brew --prefix)}"

@@ -9,6 +9,7 @@ struct StackStatus: Decodable {
 	var ports: [String: String?]
 	var mysql: MySQLInfo
 	var mail: MailInfo
+	var upgrades: Upgrades?
 
 	/// Everything that is not a php-fpm pool; those live under PHP.
 	var coreServices: [Service] { services.filter { !$0.name.hasPrefix("php") } }
@@ -103,6 +104,42 @@ struct JobResult: Decodable {
 	let appChanged: Bool?
 	let appRebuilt: Bool?
 	var appNeedsRestart: Bool { (updated ?? false) && (appChanged ?? false) && !(appRebuilt ?? false) }
+}
+
+/// `devstack upgrade` state (bin/stack-upgrade), embedded in status: Homebrew upgrades of the stack itself.
+struct Upgrades: Decodable {
+	struct Outdated: Decodable, Identifiable {
+		let short: String
+		let installed: String
+		let current: String
+		let kind: String          // patch | minor | major
+		var id: String { short }
+		var line: String { "\(short) \(installed) → \(current)" }
+	}
+	struct Run: Decodable {
+		struct Upgraded: Decodable { let name: String; let from: String; let to: String }
+		struct Failed: Decodable { let name: String; let error: String? }
+		let at: String?
+		let mode: String?
+		let upgraded: [Upgraded]?
+		let restarted: [String]?
+		let failed: [Failed]?
+	}
+	let checkedAt: String?
+	let available: [Outdated]?
+	let lastRun: Run?
+	let auto: String?         // off | patch | all — what the nightly run may apply unattended
+
+	var autoEnabled: Bool { (auto ?? "off") != "off" }
+	var patches: [Outdated] { (available ?? []).filter { $0.kind == "patch" } }
+	var review: [Outdated] { (available ?? []).filter { $0.kind != "patch" } }
+	/// A run in the last 24 h that changed something (or failed) is worth a line in the panel.
+	var recentRun: Run? {
+		guard let r = lastRun, let at = r.at, let d = ISO8601DateFormatter().date(from: at), Date().timeIntervalSince(d) < 86_400 else { return nil }
+		if (r.upgraded ?? []).isEmpty && (r.failed ?? []).isEmpty { return nil }
+		return r
+	}
+	var hasNews: Bool { !(available ?? []).isEmpty || recentRun != nil }
 }
 
 /// `devstack update --check --json`

@@ -158,6 +158,12 @@ final class AppState: ObservableObject {
 
 	func runUpdate() { runJob(title: "Update DevStack", ["update", "--json"]) }
 
+	/// Homebrew upgrades of the stack. --all applies minor/major releases too; the nightly agent only does patches.
+	func runUpgrade(all: Bool) { runJob(title: all ? "Upgrade stack (everything outdated)" : "Upgrade stack (patch releases)", ["upgrade", all ? "--all" : "--auto", "--json"]) }
+	func checkUpgrades() async { await quick("upgrade-check", ["upgrade", "--check", "--json"]) }
+	/// The developer's choice for the 03:30 run: report only (off) or apply patch releases unattended.
+	func setNightlyUpgrades(_ on: Bool) async { await quick("upgrade-auto", ["upgrade", "--set-auto", on ? "patch" : "off", "--json"]) }
+
 	/// The app cannot replace itself while running: hand the rebuild to a detached `devstack app install`, which
 	/// builds, installs into /Applications and relaunches, then quit.
 	func restartAfterUpdate() {

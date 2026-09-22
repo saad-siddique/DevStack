@@ -39,6 +39,8 @@ Stack
 Repo
   devstack bootstrap [--app]                    (re)install the stack; --app also builds the menu-bar app
   devstack update [--check] [--app]             git pull + bootstrap (rebuilds the app when app/ changed); --check only reports
+  devstack upgrade --check|--auto|--all         Homebrew upgrades of the stack (--auto = patch releases only); nightly 03:30 check
+  devstack upgrade --set-auto off|patch|all     what the nightly run may apply unattended (default off: report only)
   devstack app build|install|open|uninstall|status
   devstack path                                 print the repo directory
 
@@ -75,6 +77,7 @@ case "$cmd" in
 	open)                open_target "$@" ;;
 	bootstrap)           exec "$REPO/bootstrap.sh" "$@" ;;
 	update)              exec "$BIN/update" "$@" ;;
+	upgrade)             exec "$BIN/stack-upgrade" "$@" ;;
 	path)                echo "$REPO" ;;
 	version|--version|-V) printf 'devstack %s (%s)\n' "$(git -C "$REPO" describe --tags --always --dirty 2> /dev/null || echo dev)" "$REPO" ;;
 	help|-h|--help)      usage ;;

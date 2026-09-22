@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36">
+  <!-- Menu-bar template image: the same stacked layers as Icon.svg, alpha only (macOS colours it for the bar). -->
+  <path d="M18 4.5 L31.5 11.25 L18 18 L4.5 11.25 Z" fill="#000" stroke="#000" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M5 17.5 L18 24 L31 17.5" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.62"/>
+  <path d="M5 23.5 L18 30 L31 23.5" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.36"/>
+</svg>

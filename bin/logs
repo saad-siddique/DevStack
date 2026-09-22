@@ -27,10 +27,11 @@ log_path() {
 		redis)   echo "$BREW_LOG/redis.log" ;;
 		mailpit) echo "$BREW_LOG/mailpit.log" ;;
 		prune)   echo "$BREW_LOG/devstack-prune.log" ;;
+		upgrade) echo "$BREW_LOG/devstack-upgrade.log" ;;
 		wp)      local t; t="$(readlink "$VALET_HOME/Sites/$2" 2> /dev/null || true)"; [ -n "$t" ] && echo "$t/wp-content/debug.log" ;;
 	esac
 }
-SOURCES=(nginx php php-fpm mysql redis mailpit prune)
+SOURCES=(nginx php php-fpm mysql redis mailpit prune upgrade)
 
 severity() {
 	# severity <line> : crude but predictable classification for colouring.

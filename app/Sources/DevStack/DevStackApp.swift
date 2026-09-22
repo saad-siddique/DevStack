@@ -1,6 +1,21 @@
 // DevStackApp.swift — a menu-bar-only app (LSUIElement). The panel is the MenuBarExtra window; forms and the
 // task log open in one ordinary window so they survive the panel closing.
+import AppKit
 import SwiftUI
+
+/// The same stacked-layers glyph as the app icon, as a template image (alpha only) so the menu bar tints it.
+/// Rendered by Tools/MakeIcon.swift into Contents/Resources; falls back to an SF Symbol if the files are missing.
+struct MenuBarLabel: View {
+	let alert: Bool
+	var body: some View {
+		if let img = NSImage(named: alert ? "MenuBarIconAlert" : "MenuBarIcon") {
+			let _ = { img.isTemplate = true }()
+			Image(nsImage: img)
+		} else {
+			Image(systemName: alert ? "exclamationmark.triangle" : "server.rack")
+		}
+	}
+}
 
 @main
 struct DevStackApp: App {
@@ -12,7 +27,7 @@ struct DevStackApp: App {
 		MenuBarExtra {
 			PanelView().environmentObject(state)
 		} label: {
-			Image(systemName: state.menuBarSymbol)
+			MenuBarLabel(alert: state.health == .degraded || state.health == .down)
 		}
 		.menuBarExtraStyle(.window)
 

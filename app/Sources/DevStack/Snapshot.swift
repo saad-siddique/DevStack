@@ -24,6 +24,15 @@ enum Snapshot {
 		                           commits: ["a1b2c3d Import: accept .sql.gz dumps", "b2c3d4e App: Xdebug switch per PHP version", "c3d4e5f README: LocalWP export steps"]))
 		await capture(PanelView().environmentObject(state), "panel-update", dir)
 		state.setUpdate(nil)
+		var withUpgrades = fixture
+		withUpgrades.upgrades = try? Devstack.decoder.decode(Upgrades.self, from: Data("""
+		{"checked_at":"2026-09-22T03:31:00Z","available":[{"short":"redis","installed":"8.10.2","current":"8.12.0","kind":"minor"}],
+		 "last_run":{"at":"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600 * 5)))","mode":"auto",
+		 "upgraded":[{"name":"php@8.4","from":"8.4.25","to":"8.4.26"},{"name":"mailpit","from":"1.27.0","to":"1.27.1"}],"restarted":["php@8.4","mailpit"],"failed":[]},"auto":"patch"}
+		""".utf8))
+		state.freeze(with: withUpgrades)
+		await capture(PanelView().environmentObject(state), "panel-upgrades", dir)
+		state.freeze(with: fixture)
 		state.modal = .newSite
 		await capture(ModalView().environmentObject(state), "new-site", dir)
 		state.modal = .importSite
@@ -66,7 +75,8 @@ enum Snapshot {
 			        site("legacy-intranet", "7.4"), site("plugin-dev", "default", protected: true), site("staging-mirror", "default")],
 			ports: ["80": "nginx", "443": "nginx", "3306": "mysql", "1025": "mailpit", "8025": "mailpit", "6379": "redis", "11211": "memcached"],
 			mysql: MySQLInfo(version: "8.4.6", qps: 0.4),
-			mail: MailInfo(backend: "mailpit", total: 3))
+			mail: MailInfo(backend: "mailpit", total: 3),
+			upgrades: nil)
 	}
 
 	private static func capture<V: View>(_ view: V, _ name: String, _ dir: String) async {

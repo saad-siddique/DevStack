@@ -127,6 +127,26 @@ if ( '' !== $api ) {
 		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'service failed' ) );
 	}
 
+	if ( 'upgrade' === $api && $is_write ) {
+		// brew upgrade can take minutes; the dashboard streams nothing, so allow the request the time it needs.
+		set_time_limit( 1800 );
+		$mode = (string) ( $_POST['mode'] ?? '' );
+		if ( ! in_array( $mode, array( 'check', 'auto', 'all' ), true ) ) {
+			devstack_json( 400, array( 'error' => 'Unknown upgrade mode.' ) );
+		}
+		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/stack-upgrade', '--' . $mode, '--json' ), $home );
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'stack-upgrade failed' ) );
+	}
+
+	if ( 'upgrade-auto' === $api && $is_write ) {
+		$value = (string) ( $_POST['value'] ?? '' );
+		if ( ! in_array( $value, array( 'off', 'patch', 'all' ), true ) ) {
+			devstack_json( 400, array( 'error' => 'Unknown value.' ) );
+		}
+		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/stack-upgrade', '--set-auto', $value, '--json' ), $home );
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'stack-upgrade failed' ) );
+	}
+
 	if ( 'xdebug' === $api && $is_write ) {
 		$php = (string) ( $_POST['php'] ?? '' );
 		$op  = (string) ( $_POST['op'] ?? '' );
@@ -151,6 +171,8 @@ header( 'Cache-Control: no-store' );
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DevStack</title>
 <meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="style.css?v=<?php echo (int) filemtime( __DIR__ . '/style.css' ); ?>">
 </head>
 <body>
@@ -170,7 +192,7 @@ header( 'Cache-Control: no-store' );
 		<div class="rail-foot">
 			<button class="act" type="button" id="refresh">Refresh</button>
 			<span id="age" aria-live="polite"></span>
-			<p>Reloads once a minute while this tab is visible. Actions run <code>bin/service</code> and <code>bin/php-xdebug</code>.</p>
+			<p>Reloads once a minute while this tab is visible. Actions run <code>bin/service</code>, <code>bin/php-xdebug</code> and <code>bin/stack-upgrade</code>.</p>
 		</div>
 	</aside>
 
@@ -183,6 +205,7 @@ header( 'Cache-Control: no-store' );
 				<p class="summary" id="summary" aria-live="polite">Reading the stack…</p>
 				<div class="quick" id="quick" aria-label="Quick open"></div>
 			</header>
+			<div class="upgrades" id="upgrades" hidden role="status"></div>
 			<ul class="strip" id="strip" aria-label="Service status"></ul>
 			<div class="panel-head">
 				<h3>Sites <span class="count" id="sites-count"></span></h3>
