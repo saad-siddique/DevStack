@@ -17,7 +17,7 @@ enum Snapshot {
 	private static func run(state: AppState, dir: String) async {
 		state.freeze(with: fixture)
 		try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-		state.sampler.start()
+		state.sampler.start(interval: 3)
 		try? await Task.sleep(for: .seconds(7))          // a few load samples so the chart has a line
 		await capture(PanelView().environmentObject(state), "panel", dir)
 		state.setUpdate(UpdateInfo(behind: 3, appChanged: true, dirty: false, reachable: true,

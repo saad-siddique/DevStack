@@ -119,6 +119,60 @@ struct StackUpgradeLine: View {
 	}
 }
 
+/// Crash and resource reports macOS wrote for stack processes in the last 24 hours.
+struct ReportsLine: View {
+	let reports: [Reports.Report]
+	let open: (Reports.Report) -> Void
+	let dismiss: () -> Void
+
+	var body: some View {
+		let crashes = reports.filter(\.isCrash), resource = reports.filter { !$0.isCrash }
+		HStack(alignment: .firstTextBaseline, spacing: 6) {
+			Image(systemName: crashes.isEmpty ? "gauge.with.dots.needle.67percent" : "bolt.trianglebadge.exclamationmark.fill").foregroundStyle(crashes.isEmpty ? Color.orange : Color.red)
+			VStack(alignment: .leading, spacing: 1) {
+				if !crashes.isEmpty {
+					Text("\(crashes.count) crash\(crashes.count == 1 ? "" : "es") in 24 h: \(Array(Set(crashes.map(\.process))).sorted().joined(separator: ", "))").font(.caption.weight(.medium))
+				}
+				if !resource.isEmpty {
+					Text("macOS flagged \(Array(Set(resource.map { "\($0.process) (\($0.kind ?? "resource"))" })).sorted().joined(separator: ", ")) — a runaway request or job?")
+						.font(crashes.isEmpty ? .caption.weight(.medium) : .caption2).lineLimit(2)
+				}
+			}
+			Spacer(minLength: 6)
+			if let first = reports.first { Button("Open") { open(first) }.controlSize(.small).help("Open the newest report in Console") }
+			Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.borderless).controlSize(.small).help("Hide until new reports appear")
+		}
+		.padding(.horizontal, 10).padding(.vertical, 6)
+		.background((crashes.isEmpty ? Color.orange : Color.red).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+	}
+}
+
+/// A stack process hot for more than a minute (or holding gigabytes): name it and offer the restart.
+struct RunawayLine: View {
+	let runaways: [UsageSampler.Runaway]
+	let restart: (String) -> Void
+	let busy: (String) -> Bool
+
+	var body: some View {
+		VStack(spacing: 6) {
+			ForEach(runaways) { r in
+				HStack(alignment: .firstTextBaseline, spacing: 6) {
+					Image(systemName: "flame.fill").foregroundStyle(Color.orange)
+					VStack(alignment: .leading, spacing: 1) {
+						Text("\(r.service) at \(Int(r.cpu))% CPU, \(Int(r.memoryMB)) MB").font(.caption.weight(.medium))
+						Text(r.memoryMB >= UsageSampler.hotMemoryMB ? "Holding more than \(Int(UsageSampler.hotMemoryMB / 1024)) GB of memory." : "Hot for \(Int(Date().timeIntervalSince(r.since))) s. A stuck request or an endless loop? Restarting drops in-flight requests.")
+							.font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+					}
+					Spacer(minLength: 6)
+					Button(busy(r.service) ? "Restarting…" : "Restart") { restart(r.service) }.controlSize(.small).disabled(busy(r.service))
+				}
+			}
+		}
+		.padding(.horizontal, 10).padding(.vertical, 6)
+		.background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+	}
+}
+
 /// Summed CPU of php-fpm, nginx, mysqld, redis, memcached, mailpit and dnsmasq over the last three minutes.
 struct UsageChart: View {
 	@ObservedObject var sampler: UsageSampler

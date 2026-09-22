@@ -80,6 +80,47 @@ ensure_php_ini() {
 	done
 }
 
+# php-fpm pool guards (php/zz-devstack-fpm.conf) for every installed version; restart the ones that run.
+ensure_fpm_pool() {
+	log "php-fpm pool drop-ins"
+	local v dst changed=()
+	for v in "${PHP_VERSIONS[@]}"; do
+		dst="$BREW_PREFIX/etc/php/$v/php-fpm.d/zz-devstack.conf"
+		[ -d "$(dirname "$dst")" ] || continue
+		if ! sed "s#__VALET_HOME__#$VALET_HOME#" "$REPO_DIR/php/zz-devstack-fpm.conf" | cmp -s - "$dst"; then
+			sed "s#__VALET_HOME__#$VALET_HOME#" "$REPO_DIR/php/zz-devstack-fpm.conf" > "$dst"; changed+=("$v"); ok "installed $dst"
+		else ok "up to date: $dst"; fi
+	done
+	mkdir -p "$VALET_HOME/Log"
+	for v in "${changed[@]+"${changed[@]}"}"; do
+		local formula="php@$v"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"
+		if sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null | jq -e --arg n "$formula" '.[] | select(.name == $n and .status == "started")' > /dev/null; then
+			"$REPO_DIR/bin/service" "php@$v" restart > /dev/null 2>&1 && ok "restarted php-fpm $v" || warn "could not restart php-fpm $v"
+		fi
+	done
+}
+
+# MySQL tuning (mysql/zz-devstack.cnf): binary log off, fewer fsyncs, bigger buffer pool. Homebrew's my.cnf has no
+# include line, so one is appended once; existing binary logs are removed after MySQL restarts without binlogging.
+ensure_mysql_tuning() {
+	log "MySQL tuning"
+	local cnf="$BREW_PREFIX/etc/my.cnf" dir="$BREW_PREFIX/etc/my.cnf.d" dst changed=0
+	mkdir -p "$dir"; dst="$dir/zz-devstack.cnf"
+	if ! grep -qF "!includedir $dir" "$cnf" 2> /dev/null; then printf '\n# DevStack drop-ins\n!includedir %s\n' "$dir" >> "$cnf"; ok "my.cnf includes $dir"; changed=1; fi
+	if ! cmp -s "$REPO_DIR/mysql/zz-devstack.cnf" "$dst"; then cp "$REPO_DIR/mysql/zz-devstack.cnf" "$dst"; ok "installed $dst"; changed=1; else ok "up to date: $dst"; fi
+	if [ "1" = "$changed" ]; then
+		"$BREW_PREFIX/bin/brew" services restart mysql@8.4 > /dev/null 2>&1 && ok "restarted mysql@8.4" || warn "could not restart mysql@8.4"
+		local i; for i in $(seq 1 30); do "$BREW_PREFIX/opt/mysql@8.4/bin/mysqladmin" -uroot ping > /dev/null 2>&1 && break; sleep 1; done
+	fi
+	if [ "OFF" = "$("$BREW_PREFIX/opt/mysql@8.4/bin/mysql" -uroot -N -e "SELECT @@log_bin" 2> /dev/null | sed 's/^0$/OFF/;s/^1$/ON/')" ]; then
+		local n; n="$(ls "$BREW_PREFIX"/var/mysql/binlog.* 2> /dev/null | wc -l | tr -d ' ')"
+		if [ "$n" -gt 0 ]; then
+			local size; size="$(du -ch "$BREW_PREFIX"/var/mysql/binlog.* 2> /dev/null | tail -1 | cut -f1)"
+			rm -f "$BREW_PREFIX"/var/mysql/binlog.*; ok "removed $n stale binary logs ($size) — binlogging is off"
+		fi
+	fi
+}
+
 # Xdebug formulae drop conf.d/20-xdebug.ini (always on). First time we see one, switch it off; after that
 # bin/php-xdebug owns the state (marker file .xdebug-managed).
 ensure_xdebug_default_off() {
@@ -313,10 +354,12 @@ ensure_formulae
 php_versions_installed
 ensure_php_linked
 ensure_php_ini
+ensure_fpm_pool
 ensure_xdebug_default_off
 ensure_composer_path
 ensure_valet
 ensure_services
+ensure_mysql_tuning
 ensure_dashboard
 ensure_phpmyadmin
 ensure_log_pruning

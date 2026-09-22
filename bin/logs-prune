@@ -13,7 +13,7 @@ to_bytes() { case "$1" in *G) echo $(( ${1%G} * 1024 * 1024 * 1024 )) ;; *M) ech
 MAX_BYTES="$(to_bytes "$MAX_SIZE")"
 
 VALET_LOG="$VALET_HOME/Log"; BREW_LOG="$BREW_PREFIX/var/log"
-targets=("$VALET_LOG/nginx-error.log" "$VALET_LOG/php-fpm.log" "$BREW_LOG/php-fpm.log" "$BREW_LOG/redis.log" "$BREW_LOG/mailpit.log" "$BREW_LOG/devstack-prune.log" "$BREW_LOG/devstack-upgrade.log")
+targets=("$VALET_LOG/nginx-error.log" "$VALET_LOG/php-fpm.log" "$VALET_LOG/php-fpm-slow.log" "$BREW_LOG/php-fpm.log" "$BREW_LOG/redis.log" "$BREW_LOG/mailpit.log" "$BREW_LOG/devstack-prune.log" "$BREW_LOG/devstack-upgrade.log")
 for f in "$BREW_PREFIX"/var/mysql/*.err; do [ -f "$f" ] && targets+=("$f"); done
 for l in "$VALET_HOME"/Sites/*; do [ -L "$l" ] && t="$(readlink "$l")" && [ -f "$t/wp-content/debug.log" ] && targets+=("$t/wp-content/debug.log"); done
 for f in "$LOG_DIR"/*.log; do [ -f "$f" ] && targets+=("$f"); done

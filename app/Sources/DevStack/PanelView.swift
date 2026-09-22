@@ -24,6 +24,14 @@ struct PanelView: View {
 				StackUpgradeLine(upgrades: up, upgradeAll: { state.runUpgrade(all: true) }, upgradePatches: { state.runUpgrade(all: false) })
 					.padding(.horizontal, 14).padding(.bottom, 8)
 			}
+			if !state.runaways.isEmpty {
+				RunawayLine(runaways: state.runaways, restart: { svc in Task { await state.restartService(named: svc) } }, busy: { state.isBusy($0) })
+					.padding(.horizontal, 14).padding(.bottom, 8)
+			}
+			if !state.activeReports.isEmpty {
+				ReportsLine(reports: state.activeReports, open: { state.openReport($0) }, dismiss: { state.dismissReports() })
+					.padding(.horizontal, 14).padding(.bottom, 8)
+			}
 			quickOpen.padding(.horizontal, 14).padding(.bottom, 10)
 			UsageChart(sampler: state.sampler).padding(.horizontal, 14)
 			Picker("Section", selection: $tab) {
@@ -64,6 +72,8 @@ struct PanelView: View {
 			.disabled(state.isRefreshing)
 			Menu {
 				Button("Open dashboard") { state.open("https://dashboard.test") }
+				Button("Run doctor") { present(.task); state.runDoctor() }
+				Divider()
 				Button("Open repo folder") { state.openRepo() }
 				Button("Open Sites folder") { state.openFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Sites").path) }
 				Divider()
@@ -170,8 +180,11 @@ struct SiteRow: View {
 	let site: Site
 	let present: (AppState.Modal) -> Void
 
+	private var fpmStopped: String? { state.fpmProblem(for: site) }
+
 	private var subtitle: String {
 		var parts = ["PHP \(site.php == "default" ? (state.status?.defaultPhp?.version ?? "default") : site.php)"]
+		if let v = fpmStopped { parts[0] += " (php-fpm \(v) stopped)" }
 		parts.append(site.wp ? "WordPress" : "PHP / static")
 		if site.isProtected { parts.append("protected") }
 		return parts.joined(separator: "  ·  ")
@@ -179,10 +192,15 @@ struct SiteRow: View {
 
 	var body: some View {
 		Row(title: site.name, subtitle: subtitle) {
-			Image(systemName: site.isProtected ? "shield.lefthalf.filled" : (site.secured ? "lock.fill" : "lock.open"))
-				.font(.caption).frame(width: 12)
-				.foregroundStyle(site.isProtected ? Color.orange : (site.secured ? Color.green : Color.secondary))
-				.help(site.isProtected ? "Protected site: never removed by tooling" : (site.secured ? "HTTPS" : "HTTP only"))
+			if fpmStopped != nil {
+				Image(systemName: "exclamationmark.triangle.fill").font(.caption).frame(width: 12).foregroundStyle(Color.orange)
+					.help("This site's PHP version is not running; it answers 502 until it is started")
+			} else {
+				Image(systemName: site.isProtected ? "shield.lefthalf.filled" : (site.secured ? "lock.fill" : "lock.open"))
+					.font(.caption).frame(width: 12)
+					.foregroundStyle(site.isProtected ? Color.orange : (site.secured ? Color.green : Color.secondary))
+					.help(site.isProtected ? "Protected site: never removed by tooling" : (site.secured ? "HTTPS" : "HTTP only"))
+			}
 		} trailing: {
 			if state.isBusy(site.name) { ProgressView().controlSize(.mini).frame(width: 16) }
 			Button { state.open(site.url) } label: { Image(systemName: "safari") }
@@ -192,11 +210,29 @@ struct SiteRow: View {
 					.buttonStyle(.borderless).help("Log in to wp-admin (one-time link)")
 			}
 			Menu {
+				if let v = fpmStopped {
+					Button("Start PHP \(v) (site is down)") { Task { await state.startPhp(version: v) } }
+					Divider()
+				}
 				Button("Log in to wp-admin") { Task { await state.login(siteNamed: site.name) } }.disabled(!site.wp)
 				Button("Open wp-admin") { state.open(site.adminUrl) }.disabled(!site.wp)
 				Button("Open folder") { state.openFolder(site.path) }
+				ForEach(state.editors, id: \.path) { e in
+					Button("Open in \(e.name)") { state.open(site.path, with: e.path) }
+				}
 				Button("Copy URL") { state.copy(site.url) }
 				Divider()
+				Menu("PHP version") {
+					ForEach(state.status?.php ?? []) { p in
+						let current = site.php == p.version || (site.php == "default" && p.isDefault)
+						Button {
+							state.switchPhp(site, to: p.isDefault ? "default" : p.version)
+						} label: {
+							if current { Label("PHP \(p.version)\(p.isDefault ? " (default)" : "")", systemImage: "checkmark") } else { Text("PHP \(p.version)\(p.isDefault ? " (default)" : "")") }
+						}
+						.disabled(current || site.isProtected)
+					}
+				}
 				Button("Back up now") { state.backup(site) }
 				Button("Remove…", role: .destructive) { present(.remove(site)) }.disabled(site.isProtected)
 			} label: {

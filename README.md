@@ -69,8 +69,12 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 
 - Header: how many services are online, how many sites, the default PHP version; a refresh button and the ⋯ menu
   (dashboard, repo and Sites folders, Start at login, update checks, the nightly-upgrade switch, Quit).
-- Notices, when there are any: **Update available** for this repo, and the **stack upgrades** line (see *Keeping
-  the stack current* below) with what Homebrew changed overnight and what is waiting, each with its button.
+- Notices, when there are any: **Update available** for this repo; the **stack upgrades** line (see *Keeping
+  the stack current* below); a **runaway** line when a stack process has sat above 120% CPU for 90 seconds or holds
+  more than 3 GB, with a Restart button; and a **reports** line when macOS wrote a crash or resource report for a
+  stack process in the last 24 hours (Open shows it in Console).
+- macOS notifications (allow them once when asked): a core service going down, a new crash or resource report, a
+  finished task while the panel is closed, an overnight upgrade, an update becoming available.
 - Quick-open: **Dashboard** (`https://dashboard.test`), **phpMyAdmin** (every database, signed in as root) and
   **Mailpit** with the count of caught mails.
 - **Stack load**: CPU and memory of the stack's own processes (php-fpm, nginx, mysqld, redis, memcached, mailpit,
@@ -96,6 +100,9 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Start/stop a service | Services tab → switch. Restart with the arrow. |
 | Switch Xdebug on or off | PHP tab → Xdebug checkbox on that version. |
 | Stop an idle PHP version | PHP tab → switch (the default version stays on). |
+| Change a site's PHP version | ⋯ → PHP version → pick one. Writes `.valetrc`, isolates the site, starts that php-fpm. |
+| Open a site in your editor or terminal | ⋯ → Open in VS Code / Cursor / PhpStorm / Terminal (whatever is installed). |
+| Check the whole stack | ⋯ → Run doctor. Every check with its fix, in the task window. |
 | See what went wrong | Every long task streams its log into the task window; *Copy log* copies it. Stack logs are on the dashboard's Logs tab. |
 
 ![New site](docs/img/new-site.png) ![Task log](docs/img/task.png)
@@ -142,6 +149,8 @@ devstack backup myplugin                         # ~/Backups/DevStack/myplugin/<
 devstack backups                                 # list them, newest first
 devstack remove myplugin --yes --backup          # back up, then unlink, unsecure, drop database + user, delete the folder
 devstack sites                                   # linked sites with PHP version and protection flag
+devstack php myplugin 7.4                        # switch one site's PHP version (7.4 … 8.6, or default); starts that php-fpm
+devstack doctor                                  # check everything (DNS, nginx, php-fpm, MySQL, ports, certs, agents) with fixes
 devstack open myplugin | dashboard | phpmyadmin | mailpit
 devstack xdebug on --php 8.4                     # trigger mode, port 9003; XDEBUG_TRIGGER=1 or a browser helper starts a session
 devstack service mailpit restart                 # nginx dnsmasq mysql@8.4 mailpit redis memcached php@<any installed>
@@ -234,6 +243,31 @@ new name. `devstack remove --backup` refuses to delete anything when the backup 
   over 100 MB is rotated at once.
 - Dashboard writes (start/stop, Xdebug) are POST requests that require the `X-Devstack: 1` header and only call the
   `bin/` commands with allow-listed arguments, so another website open in your browser cannot trigger them.
+
+## Guards
+
+What keeps a bad plugin, a stuck request or a forgotten service from ruining the afternoon:
+
+- **launchd restarts** php-fpm, MySQL, Redis, Memcached and Mailpit if they crash (Homebrew sets `KeepAlive`).
+  nginx is the exception; the app notices within five minutes, notifies, and offers Restart.
+- **php-fpm pool guard** (`php/zz-devstack-fpm.conf`, installed for every version): 20 workers instead of Valet's 5
+  (wp-admin fires several requests at once and the pool hit its ceiling on day one), workers recycled every 500
+  requests, a request killed after 300 s, and anything slower than 15 s written with a stack trace to
+  `~/.config/valet/Log/php-fpm-slow.log` (`devstack logs slow`).
+- **MySQL** (`mysql/zz-devstack.cnf`): binary logging off (it had grown to 7 GB in a day and earned mysqld a
+  macOS "disk writes" report), `innodb_flush_log_at_trx_commit = 2`, a 512 MB buffer pool, 256 MB packets for big
+  imports. Bootstrap installs it and deletes the stale binary logs once MySQL runs without them.
+- **Runaway watch** in the app: process CPU and memory are sampled every 3 s while the panel is open and once a
+  minute while closed; a service above 120% CPU for 90 s or over 3 GB gets a line with a Restart button and a
+  notification.
+- **macOS reports**: `devstack logs crashes` lists crash reports (`.ips`) and resource reports (`.diag`: disk
+  writes, CPU, wakeups) for stack processes. Crashes are red, resource reports orange, in the app, on the dashboard
+  and in `devstack doctor`.
+- **`devstack doctor`**: DNS resolver and dnsmasq, nginx and its config, ports 80/443 and who holds them, php-fpm per
+  version against the sites that need it, MySQL, Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet
+  signs sites for a year), sudoers trust, the devstack link, both LaunchAgents, free disk, backup size, the stray
+  wp-config trap, recent reports. Every finding comes with the command that fixes it. Exit 1 when something is red.
+- **Logs** rotate daily and never outlive 48 hours (see below).
 
 ## Keeping the stack current
 
@@ -363,5 +397,11 @@ docs/                 the MAMP-to-Valet handoff, build records (docs/superpowers
   `xcodebuild -checkFirstLaunchStatus` passes and falls back to the Command Line Tools otherwise.
 - `devstack app snapshot` orders its windows front without activating the app: an early version activated itself and
   swallowed a keystroke meant for another app. Never call `activate(ignoringOtherApps:)` from unattended code.
+- macOS ships bash 3.2. Inside `$( … )`, a `case` pattern written as `*.ips)` ends the command substitution early
+  ("unbound variable" from a line that sets it); write patterns as `(*.ips)`. `mapfile` does not exist either.
+- Homebrew's service plists are `sh.brew.<formula>.plist` now (not `homebrew.mxcl.*`); every stack service has
+  `KeepAlive` except nginx.
+- php-fpm merges a second `[valet]` section from `php-fpm.d/zz-devstack.conf` over Valet's `valet-fpm.conf`, so pool
+  tuning survives Valet regenerating its file.
 - A GUI app starts with a bare environment. `bin/devstack` puts `/opt/homebrew/bin` first on `PATH`, and the sudoers
   rules from `valet trust` cover any process of the user, so `valet` and `brew services` work from the app without a TTY.

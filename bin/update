@@ -28,7 +28,7 @@ if [ "1" = "$CHECK" ]; then
 	fi
 	behind="$(git rev-list --count "HEAD..$upstream")"
 	changed=false; [ "$behind" -gt 0 ] && app_changed HEAD "$upstream" && changed=true
-	commits="$(git log --format='%h %s' "HEAD..$upstream" | head -20 | jq -R . | jq -s .)"
+	commits="$(git log --format='%h %s' "HEAD..$upstream" | head -20 | jq -R . | jq -s . || echo '[]')"
 	if [ "1" = "$JSON" ]; then
 		jq -n --arg b "$branch" --arg u "$upstream" --argjson behind "$behind" --argjson app "$changed" --argjson dirty "$dirty" --argjson c "$commits" \
 			'{branch:$b,upstream:$u,behind:$behind,app_changed:$app,dirty:$dirty,reachable:true,commits:$c,checked_at:(now|todate)}'

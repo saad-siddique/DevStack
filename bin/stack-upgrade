@@ -110,7 +110,7 @@ if [ "check" != "$MODE" ]; then
 			full="$(jq -r .name <<<"$row")"; short="${full##*/}"; ours_has "$short" || continue
 			inst="$(jq -r .installed <<<"$row")"; cur="$(jq -r .current <<<"$row")"
 			jq -c --arg short "$short" --arg kind "$(kind "$inst" "$cur")" '. + {short:$short, kind:$kind}' <<<"$row"
-		done | jq -s '.')"
+		done | jq -s '.' || echo '[]')"
 	log "upgraded $(jq length <<<"$upgraded"), failed $(jq length <<<"$failed"), still outdated $(jq length <<<"$available")"
 fi
 

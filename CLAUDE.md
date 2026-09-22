@@ -12,6 +12,7 @@ live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas 
   code. Check UI changes with `devstack app snapshot` and look at `docs/img/*.png`. Build with `devstack app build`.
 - PHP (`dashboard/`, `drivers/`, `mu-plugins/`): WordPress coding standards, tabs, **Yoda conditions**.
 - Every script must be idempotent and safe to re-run on an already-migrated site.
+- bash 3.2 (macOS) only: no `mapfile`, no `declare -A`; `case` patterns inside `$( … )` must be written `(pattern)`.
 - Nothing here ever edits `php.ini` in place; PHP settings go in `php/zz-uo-dev.ini` copied to `conf.d/`.
 - Valet machine-local state (`~/.config/valet`) and SQL dumps are never committed.
 - `mu-plugins/*.php` must stay inert off `.test` hosts (check `HTTP_HOST`) and PHP 7.4-compatible; `install_mu_plugins`

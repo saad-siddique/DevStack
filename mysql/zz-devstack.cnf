@@ -1,0 +1,8 @@
+# DevStack MySQL drop-in, copied by bootstrap into /opt/homebrew/etc/my.cnf.d/ (my.cnf gets one !includedir line).
+# Local development has no replicas and no point-in-time recovery: the binary log only burns disk (7 GB seen) and
+# writes. Fewer fsyncs and a bigger buffer pool make imports and wp-admin noticeably quicker.
+[mysqld]
+disable_log_bin
+innodb_flush_log_at_trx_commit = 2
+innodb_buffer_pool_size = 512M
+max_allowed_packet = 256M

@@ -255,18 +255,21 @@
 	function renderAlert( s ) {
 		var box = $( 'alert' );
 		var errs = s.services.filter( function ( x ) { return /^error/.test( x.status ); } ).map( function ( x ) { return x.name; } );
-		var crashes = s.crashes ? s.crashes.count : 0;
+		var reports = ( s.crashes && s.crashes.reports ) || [];
+		var crashes = reports.filter( function ( r ) { return 'crash' === r.kind; } );
+		var resource = reports.filter( function ( r ) { return 'crash' !== r.kind; } );
+		var uniq = function ( a ) { return a.filter( function ( v, i, arr ) { return arr.indexOf( v ) === i; } ); };
 		var parts = [];
-		if ( crashes ) {
-			var procs = s.crashes.reports.map( function ( r ) { return r.process; } ).filter( function ( v, i, a ) { return a.indexOf( v ) === i; } );
-			parts.push( crashes + ( 1 === crashes ? ' crash report' : ' crash reports' ) + ' in the last 24 hours (' + procs.join( ', ' ) + ')' );
-		}
+		if ( crashes.length ) { parts.push( crashes.length + ( 1 === crashes.length ? ' crash' : ' crashes' ) + ' in the last 24 hours (' + uniq( crashes.map( function ( r ) { return r.process; } ) ).join( ', ' ) + ')' ); }
 		if ( errs.length ) { parts.push( 'launchd reports errors for ' + errs.join( ', ' ) ); }
+		if ( resource.length ) { parts.push( 'macOS flagged ' + uniq( resource.map( function ( r ) { return r.process + ' for ' + r.kind; } ) ).join( ', ' ) + ' (runaway process?)' ); }
+		var severe = crashes.length > 0 || errs.length > 0;
 		box.hidden = 0 === parts.length;
-		box.textContent = parts.join( '. ' ) + ( parts.length ? '. Check the php-fpm and nginx logs.' : '' );
-		$( 'pulse' ).classList.toggle( 'stale', parts.length > 0 );
+		box.classList.toggle( 'warn', ! severe );
+		box.textContent = parts.join( '. ' ) + ( parts.length ? ( severe ? '. Check the php-fpm and nginx logs.' : '. See devstack logs crashes.' ) : '' );
+		$( 'pulse' ).classList.toggle( 'stale', severe );
 		navDot( 'services', errs.length > 0 );
-		navDot( 'logs', crashes > 0 );
+		navDot( 'logs', crashes.length > 0 );
 	}
 
 	// Homebrew state of the stack (bin/stack-upgrade): what the nightly run did, what waits, and the nightly setting.

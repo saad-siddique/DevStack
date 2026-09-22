@@ -142,6 +142,26 @@ struct Upgrades: Decodable {
 	var hasNews: Bool { !(available ?? []).isEmpty || recentRun != nil }
 }
 
+/// `devstack logs crashes --json`: macOS crash (.ips) and resource (.diag) reports for stack processes.
+struct Reports: Decodable {
+	struct Report: Decodable, Identifiable {
+		let process: String
+		let time: String?
+		let kind: String?       // "crash" or a resource event: "disk writes", "cpu", "wakeups"
+		let reason: String?
+		let file: String?
+		var id: String { file ?? process + (time ?? "") }
+		var isCrash: Bool { (kind ?? "crash") == "crash" }
+	}
+	let hours: Int?
+	let count: Int?
+	let crashes: Int?
+	let resource: Int?
+	let reports: [Report]?
+	var crashList: [Report] { (reports ?? []).filter(\.isCrash) }
+	var resourceList: [Report] { (reports ?? []).filter { !$0.isCrash } }
+}
+
 /// `devstack update --check --json`
 struct UpdateInfo: Decodable {
 	let behind: Int?

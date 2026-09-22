@@ -4,6 +4,7 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 struct TaskLog {
 	var title = ""
@@ -50,6 +51,8 @@ final class AppState: ObservableObject {
 	@Published private(set) var panelOpen = false
 	@Published private(set) var update: UpdateInfo?
 	@Published private(set) var checkingUpdates = false
+	@Published private(set) var reports: Reports?
+	@Published var dismissedReportIDs: Set<String> = []
 
 	let sampler = UsageSampler()
 	let installed = Devstack.isInstalled
@@ -59,12 +62,21 @@ final class AppState: ObservableObject {
 	var showModalWindow: (() -> Void)?
 	private var loop: Task<Void, Never>?
 
+	private let notifier = Notifier()
+	private var seenReportIDs: Set<String>?          // nil until the first read: existing reports are not news
+	private var lastHealth: Health = .unknown
+	private var lastUpgradeRunAt: String??            // nil until first read
+	private var notifiedUpdateHead: String?
+
 	init() {
 		if !installed { errorMessage = Devstack.Failure.notInstalled.localizedDescription }
+		sampler.start(interval: 60)
 		Task { await refresh() }
 		schedule()
 		scheduleUpdateChecks()
 	}
+
+	var runaways: [UsageSampler.Runaway] { sampler.runaways }
 
 	var health: Health {
 		guard installed, errorMessage == nil || status != nil else { return .unknown }
@@ -97,14 +109,14 @@ final class AppState: ObservableObject {
 
 	func panelDidAppear() {
 		panelOpen = true
-		sampler.start()
+		sampler.start(interval: 3)
 		if let t = lastUpdated, Date().timeIntervalSince(t) < 10 { } else { Task { await refresh() } }
 		schedule()
 	}
 
 	func panelDidDisappear() {
 		panelOpen = false
-		sampler.stop()
+		sampler.start(interval: 60)
 		schedule()
 	}
 
@@ -122,7 +134,48 @@ final class AppState: ObservableObject {
 			if frozen { return }
 			errorMessage = error.localizedDescription
 		}
+		reports = try? await Devstack.runJSON(Reports.self, ["logs", "crashes", "--hours", "24", "--json"])
+		noticeChanges()
 	}
+
+	/// Turn state changes into macOS notifications: health dropping, a new crash or resource report, an overnight
+	/// upgrade, an update becoming available. Nothing fires on the first read after launch.
+	private func noticeChanges() {
+		if let st = status {
+			let h = st.health
+			if lastHealth == .ok, h == .down || h == .degraded {
+				let down = st.coreServices.filter { !$0.isRunning }.map(\.name)
+				notifier.post(title: h == .down ? "DevStack: a core service is down" : "DevStack: stack degraded",
+				              body: down.isEmpty ? "launchd reports an error. Open DevStack for details." : "\(down.joined(separator: ", ")) not running.")
+			}
+			lastHealth = h
+			let runAt = st.upgrades?.lastRun?.at
+			if let previous = lastUpgradeRunAt, previous != runAt, let run = st.upgrades?.lastRun {
+				let up = (run.upgraded ?? []).map { "\($0.name) \($0.from) → \($0.to)" }
+				let failed = (run.failed ?? []).map(\.name)
+				if !up.isEmpty || !failed.isEmpty {
+					notifier.post(title: failed.isEmpty ? "DevStack upgraded the stack" : "DevStack: stack upgrade had failures",
+					              body: (up.isEmpty ? "" : up.joined(separator: ", ")) + (failed.isEmpty ? "" : " Failed: \(failed.joined(separator: ", "))"))
+				}
+			}
+			lastUpgradeRunAt = .some(runAt)
+		}
+		if let r = reports {
+			let ids = Set((r.reports ?? []).map(\.id))
+			if let seen = seenReportIDs {
+				for rep in (r.reports ?? []) where !seen.contains(rep.id) {
+					notifier.post(title: rep.isCrash ? "DevStack: \(rep.process) crashed" : "DevStack: \(rep.process) flagged for \(rep.kind ?? "resource use")",
+					              body: rep.reason ?? (rep.isCrash ? "launchd restarts it; see devstack logs crashes." : "macOS wrote a resource report; a runaway request or job?"))
+				}
+			}
+			seenReportIDs = ids
+		}
+	}
+
+	/// Reports the developer has not dismissed yet (dismissal lasts until the app restarts).
+	var activeReports: [Reports.Report] { (reports?.reports ?? []).filter { !dismissedReportIDs.contains($0.id) } }
+	func dismissReports() { dismissedReportIDs.formUnion((reports?.reports ?? []).map(\.id)) }
+	func openReport(_ r: Reports.Report) { if let f = r.file { openFolder(f) } }
 
 	func setUpdate(_ info: UpdateInfo?) { update = info }   // snapshot fixtures only
 
@@ -154,6 +207,21 @@ final class AppState: ObservableObject {
 		defer { checkingUpdates = false }
 		// Silent on failure: no network or no upstream is not worth a red line in the panel.
 		update = try? await Devstack.runJSON(UpdateInfo.self, ["update", "--check", "--json"])
+		if let u = update, u.isAvailable, let head = u.commits?.first, head != notifiedUpdateHead {
+			notifiedUpdateHead = head
+			notifier.post(title: "DevStack update available", body: "\(u.behind ?? 0) commit\((u.behind ?? 0) == 1 ? "" : "s") waiting. Open DevStack to update.")
+		}
+	}
+
+	func runDoctor() { runJob(title: "Doctor", ["doctor"]) }
+	func switchPhp(_ site: Site, to version: String) { runJob(title: "\(site.name) → PHP \(version)", ["php", site.name, version, "--json"]) }
+	func restartService(named name: String) async { await quick(name, ["service", name, "restart"]) }
+	func startPhp(version: String) async { await quick("php@\(version)", ["service", "php@\(version)", "start"]) }
+
+	/// The php-fpm a site needs is not running: the site answers 502 until it is started.
+	func fpmProblem(for site: Site) -> String? {
+		guard site.php != "default", let st = status, let p = st.php.first(where: { $0.version == site.php }) else { return nil }
+		return p.fpmRunning ? nil : p.version
 	}
 
 	func runUpdate() { runJob(title: "Update DevStack", ["update", "--json"]) }
@@ -236,6 +304,9 @@ final class AppState: ObservableObject {
 			}
 			task.finish(status)
 			if args.first == "update", status == 0 { update = nil }
+			if !panelOpen, modal != .task || NSApp.keyWindow == nil {
+				notifier.post(title: task.title, body: status == 0 ? "Finished." : "Failed with status \(status). Open DevStack for the log.")
+			}
 			await refresh()
 		}
 	}
@@ -248,6 +319,18 @@ final class AppState: ObservableObject {
 	}
 
 	func openFolder(_ path: String) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+
+	/// Editors and terminals present on this Mac, for the site menu.
+	static let editorCandidates: [(name: String, path: String)] = [
+		("Visual Studio Code", "/Applications/Visual Studio Code.app"), ("Cursor", "/Applications/Cursor.app"),
+		("PhpStorm", "/Applications/PhpStorm.app"), ("Zed", "/Applications/Zed.app"), ("Sublime Text", "/Applications/Sublime Text.app"),
+		("iTerm", "/Applications/iTerm.app"), ("Warp", "/Applications/Warp.app"), ("Ghostty", "/Applications/Ghostty.app"),
+		("Terminal", "/System/Applications/Utilities/Terminal.app"),
+	]
+	var editors: [(name: String, path: String)] { Self.editorCandidates.filter { FileManager.default.fileExists(atPath: $0.path) } }
+	func open(_ path: String, with app: String) {
+		NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: URL(fileURLWithPath: app), configuration: NSWorkspace.OpenConfiguration())
+	}
 
 	func copy(_ text: String) {
 		NSPasteboard.general.clearContents()
@@ -273,5 +356,33 @@ final class AppState: ObservableObject {
 			errorMessage = "Start at login: \(error.localizedDescription)"
 		}
 		objectWillChange.send()
+	}
+}
+
+
+/// macOS notifications (UserNotifications). Authorization is asked once; a denied request just means silence.
+final class Notifier: NSObject, UNUserNotificationCenterDelegate {
+	private var ready = false
+
+	override init() {
+		super.init()
+		guard Bundle.main.bundleIdentifier != nil else { return }      // only meaningful inside the .app bundle
+		let center = UNUserNotificationCenter.current()
+		center.delegate = self
+		center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in self?.ready = granted }
+	}
+
+	func post(title: String, body: String) {
+		guard ready else { return }
+		let content = UNMutableNotificationContent()
+		content.title = title
+		content.body = body
+		content.sound = .default
+		UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+	}
+
+	/// Show banners even while the app is frontmost (it rarely is, but the task window can be).
+	func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+		[.banner, .sound]
 	}
 }

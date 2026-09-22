@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# site-php <name> <7.4|8.0|…|8.6|default> [--json]
+# Switch the PHP version one site runs on: writes .valetrc, `valet isolate` (or `valet unisolate` for default),
+# starts that version's php-fpm if needed, then smoke-tests the site.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+NAME="" ; VER="" ; JSON=0
+for arg in "$@"; do
+	case "$arg" in
+		--json) JSON=1 ;; --*) die "unknown flag $arg" ;;
+		*) if [ -z "$NAME" ]; then NAME="$arg"; else VER="$arg"; fi ;;
+	esac
+done
+[ -n "$NAME" ] && [ -n "$VER" ] || die "usage: site-php <name> <7.4|8.0|8.1|8.2|8.3|8.4|8.5|8.6|default> [--json]"
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+[ -n "$SITE_PATH" ] && [ -d "$SITE_PATH" ] || die "unknown site '$NAME' (not linked in Valet)"
+[ "default" = "$VER" ] && VER="${DEFAULT_PHP#php@}"
+VER="${VER#php@}"
+[ -d "$BREW_PREFIX/etc/php/$VER" ] || die "PHP $VER is not installed (bootstrap installs 7.4 and 8.0–8.6)"
+PHPV="php@$VER"; URL="https://$NAME.$TLD"; was="$(site_php "$SITE_PATH")"
+mkdir -p "$LOG_DIR"; exec 2> >(tee -a "$LOG_DIR/site-php-$NAME.log" >&2)
+log "=== site-php $NAME: $was -> $PHPV"
+
+if [ "$PHPV" = "$DEFAULT_PHP" ]; then
+	rm -f "$SITE_PATH/.valetrc"
+	if valet isolated 2> /dev/null | /usr/bin/grep -qE "^\| *$NAME(\.$TLD)? "; then valet unisolate --site="$NAME" >&2; log "unisolated (default $DEFAULT_PHP)"; else log "already on the default"; fi
+else
+	printf 'php=%s\n' "$PHPV" > "$SITE_PATH/.valetrc"
+	valet isolate "$PHPV" --site="$NAME" >&2     # idempotent; also starts that version's php-fpm
+	log "isolated on $PHPV"
+fi
+wait_for_site "$URL"
+code="$(/usr/bin/curl -4 -sk -o /dev/null -m 15 -w '%{http_code}' "$URL/" || true)"
+served="$(/usr/bin/curl -sIk -m 15 "$URL/" | awk 'tolower($1)=="x-powered-by:"{print $2}' | tr -d '\r' || true)"
+log "smoke: http=$code served-by=${served:-unknown}"
+if [ "1" = "$JSON" ]; then
+	jq -n --arg name "$NAME" --arg from "$was" --arg to "$PHPV" --argjson http "${code:-0}" --arg served "$served" --argjson ok "$([ "200" = "$code" ] && echo true || echo false)" \
+		'{name:$name,from:$from,php:$to,http:$http,served_by:$served,ok:$ok}'
+else
+	echo "$NAME: $was -> $PHPV (http $code, ${served:-?})"
+fi
+[ "200" = "$code" ]

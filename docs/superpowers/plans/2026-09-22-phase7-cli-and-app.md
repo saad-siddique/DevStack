@@ -69,3 +69,17 @@ brew/valet/mysql itself.
   migrate-site, site-login on demand). Verified with curl on `cleantest` (302 → wp-admin, "Howdy, admin", reuse 403)
   and on a fresh `logintest` (also password login admin/admin1 → 302 wp-admin).
 - App: key icon and "Log in to wp-admin" per site, "Log in to wp-admin" on the task result card after New site.
+
+## Later the same day: repo updates, stack upgrades, icon, guards
+
+- `bin/update` (repo: --check / pull + bootstrap / app rebuild when app/ changed) and `bin/stack-upgrade`
+  (Homebrew: --check / --auto patch / --all; --nightly obeys settings.json auto_upgrade, default off = report only;
+  LaunchAgent com.devstack.upgrade 03:30). Saad's call: prompt, never auto-apply by default; opt-in for patches.
+- Icon: app/Icon.svg → AppIcon.icns, favicon.png, apple-touch-icon.png, MenuBarIcon(.Alert) template images.
+- Guards found by looking at the machine: `.diag` resource reports (mysqld 34 GB dirtied, php-fpm 2 GB) had been
+  counted as crashes → `logs crashes` now classifies crash vs resource; php-fpm hit `pm.max_children = 5` →
+  `php/zz-devstack-fpm.conf` (20 workers, max_requests 500, terminate 300 s, slowlog 15 s) merged over Valet's pool;
+  MySQL binlog 7.1 GB → `mysql/zz-devstack.cnf` (disable_log_bin, flush 2, 512 M pool, 256 M packet) and stale
+  binlogs removed; `bin/doctor`; `bin/site-php`; app: notifications, runaway watch (sampler always on: 3 s / 60 s),
+  reports line, site php-fpm-stopped warning, PHP version submenu, Open in editor/terminal, Run doctor.
+- bash 3.2 bit twice: `mapfile` and `case` patterns inside `$( )` (write `(*.ips)`).
