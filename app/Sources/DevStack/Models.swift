@@ -91,6 +91,7 @@ struct MailInfo: Decodable { let backend: String?; let total: Int? }
 
 /// What site-new / site-import / site-backup print with --json (only the fields the app shows).
 struct JobResult: Decodable {
+	let name: String?
 	let url: String?
 	let path: String?
 	let adminUser: String?

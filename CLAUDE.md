@@ -14,6 +14,8 @@ live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas 
 - Every script must be idempotent and safe to re-run on an already-migrated site.
 - Nothing here ever edits `php.ini` in place; PHP settings go in `php/zz-uo-dev.ini` copied to `conf.d/`.
 - Valet machine-local state (`~/.config/valet`) and SQL dumps are never committed.
+- `mu-plugins/*.php` must stay inert off `.test` hosts (check `HTTP_HOST`) and PHP 7.4-compatible; `install_mu_plugins`
+  in `bin/lib.sh` copies all of them, so a new one needs no wiring.
 
 ## Hard rules
 - `uncanny-automator` is a protected site (handoff 6.1): `migrate-all` skips it; `migrate-site` refuses without

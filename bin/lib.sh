@@ -104,6 +104,16 @@ random_secret() {
 	local s; s="$(LC_ALL=C head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9')"
 	printf '%s' "${s:0:${1:-20}}"
 }
+# install_mu_plugins <site path> : copy every repo mu-plugin (local SSL trust, one-time login) into the site, once.
+install_mu_plugins() {
+	local f dst
+	mkdir -p "$1/wp-content/mu-plugins"
+	for f in "$REPO_DIR"/mu-plugins/*.php; do
+		dst="$1/wp-content/mu-plugins/$(basename "$f")"
+		cmp -s "$f" "$dst" || cp "$f" "$dst"
+	done
+}
+
 SMOKE_JSON='{"ok":false}'   # set by site_finalize
 
 # site_finalize <host> <path> <php formula> : link, isolate, secure, mu-plugin, smoke. Sets SMOKE_JSON.
@@ -117,10 +127,7 @@ site_finalize() {
 		log "php: default"
 	fi
 	if [ ! -f "$VALET_HOME/Certificates/$host.$TLD.crt" ]; then valet secure "$host" >&2; log "https: secured"; else log "https: already"; fi
-	if [ -f "$path/wp-config.php" ]; then
-		mkdir -p "$path/wp-content/mu-plugins"
-		cmp -s "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$path/wp-content/mu-plugins/uo-local-ssl.php" || cp "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$path/wp-content/mu-plugins/uo-local-ssl.php"
-	fi
+	[ -f "$path/wp-config.php" ] && install_mu_plugins "$path"
 	wait_for_site "$url"
 	local code4 code6 fatal siteurl="" loop="" fpm
 	code4="$(/usr/bin/curl -4 -s -o /dev/null -m 15 -w '%{http_code}' "$url/" || true)"

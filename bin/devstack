@@ -25,6 +25,7 @@ Sites
   devstack backups [name]                       list backups
   devstack remove <name> --yes [--backup]       unlink, unsecure, drop database + user, delete folder
   devstack sites                                every linked site with its PHP version
+  devstack login <name> [--user U] [--print]    open wp-admin already signed in (one-time link, 60 s)
   devstack open [dashboard|phpmyadmin|mailpit|<site>]
   devstack migrate <host> | migrate-all         MAMP → Valet (sites.tsv)
 
@@ -65,6 +66,7 @@ case "$cmd" in
 	remove|rm)           exec "$BIN/site-remove" "$@" ;;
 	backup)              exec "$BIN/site-backup" "$@" ;;
 	backups)             exec "$BIN/site-backup" --list "$@" ;;
+	login)               exec "$BIN/site-login" "$@" ;;
 	sites)               exec "$BIN/stack-status" | jq -r '.sites[] | "\(.name)\t\(.php)\t\(if .secured then "https" else "http" end)\t\(if .protected then "protected" else "" end)"' | column -t -s $'\t' ;;
 	xdebug)              exec "$BIN/php-xdebug" "$@" ;;
 	service|svc)         exec "$BIN/service" "$@" ;;

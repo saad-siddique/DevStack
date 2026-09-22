@@ -135,10 +135,19 @@ final class AppState: ObservableObject {
 
 	// MARK: jobs (seconds to minutes; streamed into the task window)
 
-	func createSite(name: String, php: String, empty: Bool) {
+	func createSite(name: String, php: String, empty: Bool, adminUser: String, adminPassword: String, adminEmail: String) {
 		var args = ["new", name, "--php", php, "--json"]
-		if empty { args.append("--empty") }
+		if empty { args.append("--empty") } else { args += ["--admin-user", adminUser, "--admin-password", adminPassword, "--admin-email", adminEmail] }
 		runJob(title: "New site \(name)", args)
+	}
+
+	/// One-time login link (60 s) minted by `devstack login`; the browser lands in wp-admin signed in.
+	func login(siteNamed name: String) async {
+		busy.insert(name)
+		defer { busy.remove(name) }
+		let r = await Devstack.run(["login", name, "--print"])
+		let url = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+		if r.status == 0, url.hasPrefix("http") { open(url) } else { errorMessage = r.lastErrorLine }
 	}
 
 	func importSite(name: String, source: String, sql: String?, php: String?) {

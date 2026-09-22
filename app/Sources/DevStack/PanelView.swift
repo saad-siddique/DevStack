@@ -171,9 +171,15 @@ struct SiteRow: View {
 				.foregroundStyle(site.isProtected ? Color.orange : (site.secured ? Color.green : Color.secondary))
 				.help(site.isProtected ? "Protected site: never removed by tooling" : (site.secured ? "HTTPS" : "HTTP only"))
 		} trailing: {
+			if state.isBusy(site.name) { ProgressView().controlSize(.mini).frame(width: 16) }
 			Button { state.open(site.url) } label: { Image(systemName: "safari") }
 				.buttonStyle(.borderless).help("Open \(site.url)")
+			if site.wp {
+				Button { Task { await state.login(siteNamed: site.name) } } label: { Image(systemName: "person.badge.key") }
+					.buttonStyle(.borderless).help("Log in to wp-admin (one-time link)")
+			}
 			Menu {
+				Button("Log in to wp-admin") { Task { await state.login(siteNamed: site.name) } }.disabled(!site.wp)
 				Button("Open wp-admin") { state.open(site.adminUrl) }.disabled(!site.wp)
 				Button("Open folder") { state.openFolder(site.path) }
 				Button("Copy URL") { state.copy(site.url) }

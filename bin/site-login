@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# site-login <name> [--user LOGIN] [--print] [--json]
+# Opens the site's wp-admin already signed in: mints a one-time token (60 s, stored hashed as a transient), makes
+# sure the uo-local-autologin mu-plugin is installed, and opens https://<name>.test/?uo_login=<token>.
+# Default user: the first administrator (multisite: the first super admin). --print only prints the URL.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+NAME="" ; USER_LOGIN="" ; PRINT=0 ; JSON=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--user) USER_LOGIN="$2"; shift ;; --user=*) USER_LOGIN="${1#--user=}" ;;
+		--print) PRINT=1 ;; --json) JSON=1; PRINT=1 ;;
+		--*) die "unknown flag $1" ;;
+		*) NAME="$1" ;;
+	esac
+	shift
+done
+[ -n "$NAME" ] || die "usage: site-login <name> [--user LOGIN] [--print] [--json]"
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+[ -n "$SITE_PATH" ] && [ -d "$SITE_PATH" ] || die "unknown site '$NAME' (not linked in Valet)"
+[ -f "$SITE_PATH/wp-config.php" ] || die "$NAME is not a WordPress site"
+PHPV="$(site_php "$SITE_PATH")"; URL="https://$NAME.$TLD"
+wp() { wp_site "$PHPV" "$SITE_PATH" "$@"; }
+
+install_mu_plugins "$SITE_PATH"
+
+if [ -z "$USER_LOGIN" ]; then
+	USER_LOGIN="$(wp user list --role=administrator --field=user_login --orderby=ID --order=ASC --number=1 2> /dev/null | tail -1 || true)"
+	[ -n "$USER_LOGIN" ] || USER_LOGIN="$(wp super-admin list 2> /dev/null | head -1 || true)"
+	[ -n "$USER_LOGIN" ] || die "no administrator found on $NAME"
+fi
+USER_ID="$(wp user get "$USER_LOGIN" --field=ID 2> /dev/null | tail -1 || true)"
+[[ "$USER_ID" =~ ^[0-9]+$ ]] || die "user '$USER_LOGIN' not found on $NAME"
+
+TOKEN="$(LC_ALL=C head -c 64 /dev/urandom | xxd -p | tr -d '\n' | cut -c1-48)"
+HASH="$(printf '%s' "$TOKEN" | shasum -a 256 | cut -d' ' -f1)"
+wp transient set uo_local_autologin "$(jq -cn --arg h "$HASH" --argjson u "$USER_ID" '{hash:$h,user:$u}')" 60 --quiet \
+	|| die "could not store the login token (is the database up?)"
+LOGIN_URL="$URL/?uo_login=$TOKEN"
+
+if [ "1" = "$JSON" ]; then
+	jq -n --arg url "$LOGIN_URL" --arg user "$USER_LOGIN" --argjson id "$USER_ID" --arg site "$NAME" '{site:$site,user:$user,user_id:$id,url:$url,expires_in:60,ok:true}'
+elif [ "1" = "$PRINT" ]; then
+	echo "$LOGIN_URL"
+else
+	log "opening wp-admin on $NAME as $USER_LOGIN"
+	open "$LOGIN_URL"
+fi

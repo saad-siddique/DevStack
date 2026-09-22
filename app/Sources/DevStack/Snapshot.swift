@@ -33,7 +33,7 @@ enum Snapshot {
 		                             "12:28:39 files: cloned 10546 files", "12:28:39 done: ~/Backups/local-devstack/cleantest/20260922-122836 (264M on disk)"]
 		                        .map { Devstack.Line(isError: true, text: $0) },
 		                     running: false, exitStatus: 0,
-		                     result: JobResult(url: nil, path: NSHomeDirectory() + "/Backups/local-devstack/cleantest/20260922-122836", adminUser: nil, adminPassword: nil, ok: true))
+		                     result: JobResult(name: "cleantest", url: nil, path: NSHomeDirectory() + "/Backups/local-devstack/cleantest/20260922-122836", adminUser: nil, adminPassword: nil, ok: true))
 		state.modal = .task
 		await capture(ModalView().environmentObject(state), "task", dir)
 		print("snapshots written to \(dir)")

@@ -62,8 +62,10 @@ devstack mamp-backout                             # after MAMP PRO is stopped: h
 `cd` into the repo. Verbs map to `bin/` scripts; any `bin/` name also works (`devstack site-new …`).
 
 ```bash
-devstack new myplugin --php 8.2                  # fresh WordPress at https://myplugin.test, prints the admin password once
+devstack new myplugin --php 8.2                  # fresh WordPress at https://myplugin.test; wp-admin admin / admin1 unless
+                                                 # --admin-user/--admin-password/--admin-email say otherwise
                                                  # --php accepts 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (default), 8.5, 8.6
+devstack login myplugin                          # opens wp-admin already signed in (one-time link, 60 s, first admin)
 devstack import client ~/Downloads/client.zip    # LocalWP export, any zip/folder with a WordPress root + .sql, or a backup folder
 devstack backup myplugin                         # ~/Backups/local-devstack/myplugin/<stamp>/ — see Backups below
 devstack backups                                 # list them (newest first)
@@ -80,6 +82,15 @@ devstack update                                  # git pull + bootstrap
 devstack app install | open | snapshot | status  # the menu-bar app (below)
 ```
 
+## One-click login
+
+`devstack login <site>` (and the key icon / "Log in to wp-admin" in the app) mints a 48-hex one-time token, stores its
+SHA-256 as a 60-second transient through WP-CLI, and opens `https://<site>.test/?uo_login=<token>`. The
+`uo-local-autologin.php` mu-plugin (installed into every site by `site-new`, `site-import`, `migrate-site` and on first
+`login`) checks the host ends in `.test`, deletes the transient, compares hashes with `hash_equals`, sets the auth
+cookie and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account;
+the default is the first administrator (first super admin on multisite).
+
 ## Backups
 
 `devstack backup <site>` writes `~/Backups/local-devstack/<site>/<YYYYMMDD-HHMMSS>/` holding `files/` (an APFS clone
@@ -95,10 +106,12 @@ A SwiftUI `MenuBarExtra` (macOS 14+) that only ever runs `devstack …` and read
 no brew, valet or MySQL knowledge of its own, so when a script changes the app does not.
 
 - Panel: stack summary, quick-open buttons (Dashboard, phpMyAdmin, Mailpit with unread count), a three-minute
-  CPU/memory chart of the stack's own processes, then Sites (open, wp-admin, folder, back up, remove), Services
-  (switches, restart) and PHP (fpm switch, Xdebug checkbox).
-- New site, Import, Remove and the live task log open in one ordinary window, so a long import survives the panel
-  closing. Remove backs up first by default and is disabled for protected sites.
+  CPU/memory chart of the stack's own processes, then Sites (open, log in to wp-admin, folder, back up, remove),
+  Services (switches, restart) and PHP (fpm switch, Xdebug checkbox).
+- New site (name, PHP, wp-admin username/password/email with `admin` / `admin1` defaults), Import, Remove and the
+  live task log open in one ordinary window, so a long import survives the panel closing. The task log ends with
+  the site URL, the credentials and a "Log in to wp-admin" button. Remove backs up first by default and is disabled
+  for protected sites.
 - Cadence is lean: one `devstack status` per minute while the panel is open, one per five minutes while closed (for
   the icon), CPU samples only while the panel is open. The icon changes when a core service is down or launchd
   reports an error.

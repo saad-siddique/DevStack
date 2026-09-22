@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# site-new <name> [--php 8.4|7.4] [--empty] [--title "T"] [--admin-user U] [--admin-email E] [--json]
-# Fresh WordPress at https://<name>.test with its own DB + DB user, HTTPS, local-SSL mu-plugin. --empty: bare linked folder.
+# site-new <name> [--php 8.4|7.4] [--empty] [--title "T"] [--admin-user U] [--admin-password P] [--admin-email E] [--json]
+# Fresh WordPress at https://<name>.test with its own DB + DB user, HTTPS, local mu-plugins (SSL trust, one-time login).
+# Local dev defaults: admin / admin1 / admin@example.test. --empty: bare linked folder.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-NAME="" ; PHPV="$DEFAULT_PHP" ; EMPTY=0 ; TITLE="" ; ADMIN_USER="admin" ; ADMIN_EMAIL="admin@example.test" ; JSON=0
+NAME="" ; PHPV="$DEFAULT_PHP" ; EMPTY=0 ; TITLE="" ; ADMIN_USER="admin" ; ADMIN_PASS="admin1" ; ADMIN_EMAIL="admin@example.test" ; JSON=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--php) PHPV="$2"; shift ;; --php=*) PHPV="${1#--php=}" ;;
 		--empty) EMPTY=1 ;;
 		--title) TITLE="$2"; shift ;;
 		--admin-user) ADMIN_USER="$2"; shift ;;
+		--admin-password) ADMIN_PASS="$2"; shift ;;
 		--admin-email) ADMIN_EMAIL="$2"; shift ;;
 		--json) JSON=1 ;;
 		--*) die "unknown flag $1" ;;
@@ -17,7 +19,8 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
-[ -n "$NAME" ] || die "usage: site-new <name> [--php 8.4|7.4] [--empty] [--title T] [--admin-user U] [--admin-email E] [--json]"
+[ -n "$NAME" ] || die "usage: site-new <name> [--php 8.4|7.4] [--empty] [--title T] [--admin-user U] [--admin-password P] [--admin-email E] [--json]"
+[ -n "$ADMIN_USER" ] && [ -n "$ADMIN_PASS" ] && [ -n "$ADMIN_EMAIL" ] || die "admin user, password and email must not be empty"
 [[ "$NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "name must be lowercase letters, digits and dashes"
 case "$PHPV" in php@*) ;; *) PHPV="php@$PHPV" ;; esac
 [ -x "$(php_bin "$PHPV")" ] || die "$PHPV is not installed (brew install $PHPV)"
@@ -28,13 +31,14 @@ mkdir -p "$LOG_DIR"; exec 2> >(tee -a "$LOG_DIR/site-new-$NAME.log" >&2)
 log "=== site-new $NAME ($PHPV, empty=$EMPTY)"
 
 mkdir -p "$SITE_PATH"
-ADMIN_PASS=""; DB_NAME=""; DB_USER=""
+DB_NAME=""; DB_USER=""
 if [ "1" = "$EMPTY" ]; then
+	ADMIN_PASS=""   # nothing to log in to
 	printf '<?php\nphpinfo();\n' > "$SITE_PATH/index.php"
 	log "empty site: index.php placeholder"
 else
 	wp() { wp_site "$PHPV" "$SITE_PATH" "$@"; }
-	DB_NAME="$(db_name_for "$NAME")"; DB_USER="$DB_NAME"; DB_PASS="$(random_secret 20)"; ADMIN_PASS="$(random_secret 16)"
+	DB_NAME="$(db_name_for "$NAME")"; DB_USER="$DB_NAME"; DB_PASS="$(random_secret 20)"
 	[ -n "$TITLE" ] || TITLE="$NAME"
 	log "downloading WordPress"
 	wp core download --quiet
@@ -58,6 +62,6 @@ if [ "1" = "$JSON" ]; then
 		--arg admin "$ADMIN_USER" --arg pass "$ADMIN_PASS" --argjson smoke "$SMOKE_JSON" \
 		'{name:$name,url:$url,php:$php,path:$path,db:$db,db_user:$dbuser,admin_user:$admin,admin_password:$pass,smoke:$smoke,ok:$smoke.ok}'
 else
-	echo "$URL"; [ -z "$ADMIN_PASS" ] || echo "wp-admin: $ADMIN_USER / $ADMIN_PASS   (shown once)"
+	echo "$URL"; [ -z "$ADMIN_PASS" ] || echo "wp-admin: $ADMIN_USER / $ADMIN_PASS   (devstack login $NAME opens it signed in)"
 fi
 [ "true" = "$(jq -r .ok <<<"$SMOKE_JSON")" ]

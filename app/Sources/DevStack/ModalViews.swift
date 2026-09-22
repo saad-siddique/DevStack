@@ -49,6 +49,9 @@ final class FormModel: ObservableObject {
 	@Published var sql = ""
 	@Published var backupFirst = true
 	@Published var filter = ""
+	@Published var adminUser = "admin"
+	@Published var adminPassword = "admin1"
+	@Published var adminEmail = "admin@example.test"
 }
 
 struct NewSiteView: View {
@@ -60,31 +63,42 @@ struct NewSiteView: View {
 	private var empty: Bool { form.empty }
 
 	private var taken: Bool { state.status?.sites.contains { $0.name == name } ?? false }
-	private var canCreate: Bool { isValidName(name) && !taken && !php.isEmpty }
+	private var adminOK: Bool { empty || (!form.adminUser.isEmpty && !form.adminPassword.isEmpty && form.adminEmail.contains("@")) }
+	private var canCreate: Bool { isValidName(name) && !taken && !php.isEmpty && adminOK }
 
 	var body: some View {
 		Form {
-			TextField("Name", text: $form.name, prompt: Text("myplugin"))
-			LabeledContent("Address") {
-				Text(name.isEmpty ? "https://<name>.test" : "https://\(name).test").foregroundStyle(.secondary).textSelection(.enabled)
+			Section {
+				TextField("Name", text: $form.name, prompt: Text("myplugin"))
+				LabeledContent("Address") {
+					Text(name.isEmpty ? "https://<name>.test" : "https://\(name).test").foregroundStyle(.secondary).textSelection(.enabled)
+				}
+				PhpPicker(selection: $form.php)
+				Toggle("Empty folder only (no WordPress download)", isOn: $form.empty)
 			}
-			PhpPicker(selection: $form.php)
-			Toggle("Empty folder only (no WordPress download)", isOn: $form.empty)
+			Section("wp-admin account") {
+				TextField("Username", text: $form.adminUser)
+				TextField("Password", text: $form.adminPassword)
+				TextField("Email", text: $form.adminEmail)
+			}
+			.disabled(empty)
 			if taken {
 				Text("A site called “\(name)” already exists.").foregroundStyle(.red).font(.callout)
 			} else if !name.isEmpty && !isValidName(name) {
 				Text("Lowercase letters, digits and dashes only.").foregroundStyle(.red).font(.callout)
 			} else {
 				Text(empty ? "Creates ~/Sites/\(name.isEmpty ? "<name>" : name) with a placeholder index.php, links and secures it."
-				           : "Downloads WordPress, creates its database and user, installs it and secures it. The admin password is shown once, at the end.")
+				           : "Downloads WordPress, creates its database and user, installs it with the wp-admin account above and secures it. The task log ends with a Log in button.")
 					.foregroundStyle(.secondary).font(.callout)
 			}
 		}
 		.formStyle(.grouped)
 		.safeAreaInset(edge: .bottom) {
-			FormFooter(cancel: { dismiss() }, action: "Create site", enabled: canCreate) { state.createSite(name: name, php: php, empty: empty) }
+			FormFooter(cancel: { dismiss() }, action: "Create site", enabled: canCreate) {
+				state.createSite(name: name, php: php, empty: empty, adminUser: form.adminUser, adminPassword: form.adminPassword, adminEmail: form.adminEmail)
+			}
 		}
-		.frame(width: 480, height: 320)
+		.frame(width: 480, height: 470)
 		.navigationTitle("New site")
 		.onAppear { if form.php.isEmpty { form.php = state.status?.defaultPhp?.version ?? "" } }
 	}
@@ -283,18 +297,19 @@ struct TaskView: View {
 				HStack {
 					Text(url).font(.callout.weight(.medium)).textSelection(.enabled)
 					Button("Open") { state.open(url) }.controlSize(.small)
-					if r.adminPassword != nil { Button("Open wp-admin") { state.open(url + "/wp-admin/") }.controlSize(.small) }
+					if let name = r.name, r.adminPassword != nil {
+						Button("Log in to wp-admin") { Task { await state.login(siteNamed: name) } }.controlSize(.small)
+					}
 				}
 			}
 			if let u = r.adminUser, let p = r.adminPassword, !p.isEmpty {
 				HStack(spacing: 8) {
-					Text("wp-admin login").foregroundStyle(.secondary)
+					Text("wp-admin").foregroundStyle(.secondary)
 					Text(u).font(.callout.monospaced()).textSelection(.enabled)
 					Text("/").foregroundStyle(.tertiary)
 					Text(p).font(.callout.monospaced()).textSelection(.enabled)
 					Button { state.copy(p) } label: { Image(systemName: "doc.on.doc") }.buttonStyle(.borderless).help("Copy password")
 					Spacer()
-					Text("shown once").font(.caption).foregroundStyle(.tertiary)
 				}
 				.font(.callout)
 			}

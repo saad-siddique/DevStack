@@ -140,9 +140,7 @@ run wp cache flush --quiet 2> /dev/null || true
 log "urls: -> $SITE_URL"
 
 # 7. Local SSL mu-plugin.
-[ "1" = "$DRY" ] || mkdir -p "$SITE_PATH/wp-content/mu-plugins"
-if ! cmp -s "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$SITE_PATH/wp-content/mu-plugins/uo-local-ssl.php"; then
-	run cp "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$SITE_PATH/wp-content/mu-plugins/uo-local-ssl.php"
+if [ "1" = "$DRY" ]; then log "DRY: install mu-plugins"; else install_mu_plugins "$SITE_PATH"
 fi
 log "mu-plugin: uo-local-ssl.php in place"
 

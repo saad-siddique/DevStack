@@ -58,3 +58,14 @@ brew/valet/mysql itself.
   `devstack remove cleantest-restore --yes --backup` → backup, drop, unsecure, unlink, delete, site answers 404.
 - `devstack app build` (Command Line Tools, Swift 6.4), `devstack app snapshot` → `docs/img/{panel,new-site,import,
   remove,task}.png`, `devstack app install` → `/Applications/DevStack.app` running as a menu-bar item.
+
+## Follow-up the same afternoon: admin defaults and one-click login
+
+- `site-new` takes `--admin-user/--admin-password/--admin-email` (defaults `admin` / `admin1` / `admin@example.test`);
+  the New site form exposes them. The password is no longer random, so "shown once" is gone.
+- `mu-plugins/uo-local-autologin.php` + `bin/site-login` (`devstack login <site>`): one-time token (48 hex, 60 s,
+  SHA-256 stored as a transient via WP-CLI), `.test` host check, `hash_equals`, `wp_set_auth_cookie`, redirect to
+  wp-admin, 403 on reuse. `install_mu_plugins` in lib.sh now copies every repo mu-plugin (site_finalize,
+  migrate-site, site-login on demand). Verified with curl on `cleantest` (302 → wp-admin, "Howdy, admin", reuse 403)
+  and on a fresh `logintest` (also password login admin/admin1 → 302 wp-admin).
+- App: key icon and "Log in to wp-admin" per site, "Log in to wp-admin" on the task result card after New site.
