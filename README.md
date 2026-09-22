@@ -4,9 +4,13 @@ Native (no Docker, no VM) local WordPress dev stack for macOS on Apple Silicon:
 Laravel Valet + Homebrew PHP (8.4 default, 7.4 for compatibility sites) + `mysql@8.4` + Mailpit + WP-CLI,
 plus the scripts that migrate sites off MAMP PRO and, later, a small menu-bar app that drives the same scripts.
 
-**Status (2026-09-22):** Phase 1 (base stack) and Phase 2 (tooling) built; pilots `cleantest` (php@8.4) and
-`clean-automator` (php@7.4) migrated and green. All other sites still run on MAMP PRO. Not built yet:
-`bin/site-new`, `bin/site-import`, `bin/php-xdebug`, the `app/` menu-bar app, phpMyAdmin.
+**Status (2026-09-22):** Phase 1 (base stack) and Phase 2 (tooling) built. 17 of 24 hosts run on Valet:
+`cleantest`, `clean-automator` (7.4), `automator-docs` (7.4), `elearning-docs` (7.4), `automatorplugin`,
+`automator-app-dev`, `elearning-plugins`, `automator-plugin-platform`, `hrpartner`, `unito`, `lindris`, `uncannyowl`,
+`wpmu` (subdirectory multisite), `automator-api`, `uo-ap-edd-licensing`, `basecamp`, `learndash-docs`.
+Still on MAMP PRO: `tincanny`, `tincanny-core`, `uncanny-ceu`, `uncanny-codes`, `uncanny-groups`, `uncanny-toolkit`,
+and the protected `uncanny-automator`. Mailpit took over :1025/:8025 once MailHog was disabled in MAMP PRO.
+Not built yet: `bin/site-new`, `bin/site-import`, `bin/php-xdebug`, the `app/` menu-bar app, phpMyAdmin.
 
 Plan and inventory: `docs/mamp-to-valet-migration-handoff-v2.md` (section 0 summary, 6 phases, 10 decisions).
 Execution log of the pilot: `docs/superpowers/plans/2026-09-22-phase1-3-pilot.md`.
@@ -56,6 +60,12 @@ scripts can run it too.
   `bin/lib.sh` goes through `sudo -n` directly once trust exists.
 - Valet 4.12.0 answers `.test` with `::1` but its nginx stubs only listen on `127.0.0.1`; bootstrap patches the stubs
   and the generated confs (`listen [::1]:…`) so Safari does not 404.
-- Mail from Valet sites reaches MAMP's MailHog on :1025 until MAMP is stopped; MailHog's UI/API live under
-  `http://localhost:8025/mailhog/`. Mailpit takes over the same ports afterwards (bootstrap starts it when free).
+- Mail from Valet sites reaches whatever listens on :1025. While MAMP's MailHog runs, that is MailHog (UI under
+  `http://localhost:8025/mailhog/`). After disabling MailHog in MAMP PRO, run `brew services start mailpit` (or
+  re-run `bootstrap.sh`); the sites need no change because `sendmail_path` already points at `mailpit sendmail`.
+- Right after `valet secure`/`isolate`, nginx and php-fpm restart; a smoke test fired immediately sees 502/503.
+  `wait_for_site` in `bin/lib.sh` polls first.
+- `WP_HOME`/`WP_SITEURL` constants in wp-config override the database; `migrate-site` rewrites them when they
+  point at the MAMP host. `display_errors=On` sends CLI warnings to stdout, so WP-CLI is run with
+  `-d display_errors=stderr` whenever its output is captured.
 - `wp search-replace` skips `guid` on purpose; a handful of `https://<host>:8890` GUIDs remain and that is fine.

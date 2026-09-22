@@ -146,16 +146,18 @@ wait_for_site "$SITE_URL"
 code4="$(/usr/bin/curl -4 -s -o /dev/null -m 10 -w '%{http_code}' "$SITE_URL/" || true)"
 code6="$(/usr/bin/curl -6 -s -o /dev/null -m 10 -w '%{http_code}' "$SITE_URL/" || true)"
 login="$(/usr/bin/curl -s -m 10 "$SITE_URL/wp-login.php" | grep -c 'loginform' || true)"   # informational: login-URL plugins move it
+# display_errors=On turns PHP fatals into HTTP 200 pages, so look at the body too.
+fatal="$(/usr/bin/curl -s -m 10 "$SITE_URL/" | grep -cE 'Fatal error|Parse error|Uncaught (Error|Exception)' || true)"
 siteurl="$(wp option get siteurl 2> /dev/null | tail -1 | sed 's#/$##')"
 powered="$(/usr/bin/curl -sI -m 10 "$SITE_URL/" | awk 'tolower($1)=="x-powered-by:"{print $2}' | tr -d '\r' || true)"
 loop="$(wp eval 'echo is_wp_error( wp_remote_get( home_url( "/wp-json/" ) ) ) ? "ERR" : "OK";' 2> /dev/null | tail -1)"
 ok=true
-[ "200" = "$code4" ] && [ "200" = "$code6" ] && [ "$siteurl" = "$SITE_URL" ] && [ "OK" = "$loop" ] || ok=false
-log "smoke: ipv4=$code4 ipv6=$code6 login=$login siteurl=$siteurl fpm=$powered loopback=$loop ok=$ok"
+[ "200" = "$code4" ] && [ "200" = "$code6" ] && [ "0" = "$fatal" ] && [ "$siteurl" = "$SITE_URL" ] && [ "OK" = "$loop" ] || ok=false
+log "smoke: ipv4=$code4 ipv6=$code6 fatal=$fatal login=$login siteurl=$siteurl fpm=$powered loopback=$loop ok=$ok"
 if [ "1" = "$JSON" ]; then
 	jq -n --arg host "$SITE_HOST" --arg url "$SITE_URL" --arg php "$SITE_PHP" --arg fpm "$powered" \
 		--arg link "$step_link" --arg isolate "$step_isolate" --arg secure "$step_secure" --arg db "$step_db" --arg dbhost "$step_dbhost" \
-		--argjson ipv4 "$code4" --argjson ipv6 "$code6" --argjson login "$login" --arg siteurl "$siteurl" --arg loopback "$loop" --argjson ok "$ok" \
-		'{host:$host,url:$url,php:$php,fpm:$fpm,steps:{link:$link,isolate:$isolate,secure:$secure,db:$db,db_host:$dbhost},smoke:{ipv4:$ipv4,ipv6:$ipv6,login_form:$login,siteurl:$siteurl,loopback:$loopback},ok:$ok}'
+		--argjson ipv4 "$code4" --argjson ipv6 "$code6" --argjson fatal "$fatal" --argjson login "$login" --arg siteurl "$siteurl" --arg loopback "$loop" --argjson ok "$ok" \
+		'{host:$host,url:$url,php:$php,fpm:$fpm,steps:{link:$link,isolate:$isolate,secure:$secure,db:$db,db_host:$dbhost},smoke:{ipv4:$ipv4,ipv6:$ipv6,php_fatal:$fatal,login_form:$login,siteurl:$siteurl,loopback:$loopback},ok:$ok}'
 fi
 [ "true" = "$ok" ]
