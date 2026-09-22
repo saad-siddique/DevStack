@@ -129,7 +129,10 @@ sendmail_path = "/opt/homebrew/bin/mailpit sendmail"
 ```
 Extensions for 8.4: `pecl install redis` (and `mongodb`, `pgsql` only if a site actually needs them — nothing in `~/Sites` WP configs references mongodb). Do the same under the 7.4 binary only if `clean-automator` needs redis (it does not today).
 
-### 4.3 Per-site config = `.valetrc`
+### 4.3 Per-site config = `.valetrc` + explicit links
+
+**Decided 2026-09-22: sites are linked explicitly from `sites.tsv` (`valet link <host>`), never parked.** That keeps `automator-platform` and the non-site folders off Valet and makes the two host≠folder cases trivial.
+
 ```ini
 # ~/Sites/<site>/.valetrc
 php=php@7.4
@@ -232,16 +235,16 @@ Verification per schema: table count and `CHECKSUM TABLE` on the options + posts
 
 **Phase 0 — Inventory: DONE** (section 3). Just re-export it to CSV from this doc if the script wants a file.
 
-**Phase 1 — Base stack, with MAMP still running** (nothing conflicts except 1025/8025 for Mailpit):
+**Phase 1 — Base stack, with MAMP still running** — **DONE 2026-09-22** (`bootstrap.sh`) (nothing conflicts except 1025/8025 for Mailpit):
 - Clean `~/.profile` (remove the whole MAMP PATH/alias block) and `~/.zshrc` (`/Applications/MAMP/bin/php/php8.3.14/bin` PATH entry). Open a new shell; confirm `which php mysql wp` are all `/opt/homebrew/...`.
 - Fix `/opt/homebrew/etc/php/8.4/php.ini` lines 1–3; `pecl install redis` for 8.4; `php -m` prints no warnings.
 - Install per 4.1. Start `mysql@8.4` only after MAMP's MySQL is stopped **or** leave MAMP's on 8889 and Homebrew's on 3306 — they coexist, which is exactly what you want for the dump/import.
 - `valet park ~/Sites`; confirm `http://uncanny-automator.test` answers over plain HTTP before any `secure`. Then `curl -6 -sI http://uncanny-automator.test` — if that fails while `-4` works, apply the IPv6 workaround in 9.7 now, not after Safari starts 404ing.
 - Start Mailpit **after** stopping MAMP's MailHog (both want 1025/8025).
 
-**Phase 2 — Tooling**: `bin/migrate-site`, `bin/migrate-all`, `zz-uo-dev.ini` drop-ins, `LocalValetDriver.php`, dashboard, `bin/php-xdebug on|off` (optional, Phase 5).
+**Phase 2 — Tooling** — **DONE 2026-09-22** (`bin/`, `php/`, `drivers/`, `mu-plugins/`, `dashboard/`): `bin/migrate-site`, `bin/migrate-all`, `zz-uo-dev.ini` drop-ins, `LocalValetDriver.php`, dashboard, `bin/php-xdebug on|off` (optional, Phase 5).
 
-**Phase 3 — Pilot #1: `cleantest`** (8.4, single-site, disposable — decided). Then **Pilot #2: `wpmu`** (the only multisite; it is the risky one, do not discover its problems in the batch). Then **Pilot #3: `clean-automator`** (proves the 7.4 isolation path and `valet php` for Codeception).
+**Phase 3 — Pilot #1: `cleantest`** (8.4, single-site, disposable — decided) — **DONE 2026-09-22, green**. Then **Pilot #2: `wpmu`** (the only multisite; it is the risky one, do not discover its problems in the batch). Then **Pilot #3: `clean-automator`** (proves the 7.4 isolation path and `valet php` for Codeception) — **DONE 2026-09-22, green** (`wpmu` pilot still pending).
 
 **Phase 4 — Batch** the remaining hosts **except `uncanny-automator`** (20 hosts: 24 real hosts minus the 3 pilots minus the protected site). `bin/migrate-all` must skip protected sites unless called with `--include-protected`.
 

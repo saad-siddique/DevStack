@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# migrate-all [--only=host1,host2] [--include-protected] [--dry-run]
+# Runs migrate-site over the inventory; protected sites are skipped unless asked; never aborts on one failure.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+ONLY="" ; INCLUDE_PROTECTED=0 ; EXTRA=()
+for arg in "$@"; do
+	case "$arg" in
+		--only=*) ONLY="${arg#--only=}" ;;
+		--include-protected) INCLUDE_PROTECTED=1 ;;
+		--dry-run) EXTRA+=(--dry-run) ;;
+		*) die "unknown argument $arg" ;;
+	esac
+done
+
+to_json_array() { printf '%s\n' "$@" | jq -R . | jq -s 'map(select(. != ""))'; }
+
+pass=() ; fail=() ; skip=()
+for host in $(all_hosts); do
+	site_row "$host"
+	if [ -n "$ONLY" ] && ! printf ',%s,' "$ONLY" | grep -q ",$host,"; then continue; fi
+	if [ "yes" = "$SITE_PROTECTED" ] && [ "1" != "$INCLUDE_PROTECTED" ]; then skip+=("$host"); continue; fi
+	flags=("${EXTRA[@]+"${EXTRA[@]}"}")
+	[ "yes" = "$SITE_PROTECTED" ] && flags+=(--i-have-a-backup)
+	if "$REPO_DIR/bin/migrate-site" "$host" "${flags[@]+"${flags[@]}"}"; then pass+=("$host"); else fail+=("$host"); fi
+done
+jq -n --argjson pass "$(to_json_array "${pass[@]+"${pass[@]}"}")" \
+      --argjson fail "$(to_json_array "${fail[@]+"${fail[@]}"}")" \
+      --argjson skipped "$(to_json_array "${skip[@]+"${skip[@]}"}")" \
+      '{pass:$pass,fail:$fail,skipped_protected:$skipped}'
+[ "${#fail[@]}" -eq 0 ]
