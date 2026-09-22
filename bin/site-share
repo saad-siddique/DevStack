@@ -6,7 +6,7 @@
 #   * a NAMED tunnel when ~/.cloudflared/config.yml already maps a hostname to https://<name>.test (stable URL, good
 #     for webhooks you configure once). --hostname H rewrites/creates that ingress rule for the site first.
 #   * a site without a rule gets one automatically when a named tunnel exists: the hostname follows the pattern of the
-#     rules already there (saad-wp.example.com → saad-<site>.example.com) or settings.json share_hostname_pattern
+#     rules already there (dev-wp.example.com → dev-<site>.example.com) or settings.json share_hostname_pattern
 #     ("{site}" placeholder), and cloudflared creates the DNS record.
 #   * a QUICK tunnel (random *.trycloudflare.com URL) only when there is no named tunnel at all; the edge often answers
 #     530/1033 for a minute or longer on those.
@@ -128,7 +128,7 @@ PY
 	if [ -z "$mapped_host" ] && [ -z "$HOSTNAME_WANT" ] && grep -q '^tunnel:' "$CONF"; then
 		pattern="$(jq -r '.share_hostname_pattern // empty' "$DATA_DIR/settings.json" 2> /dev/null || true)"
 		if [ -z "$pattern" ]; then
-			# Derive from the first rule that already points at a .test site: label "saad-wp" + zone → "saad-{site}.zone".
+			# Derive from the first rule that already points at a .test site: label "dev-wp" + zone → "dev-{site}.zone".
 			example="$(awk -v tld=".$TLD" '/^  - hostname:/ { h=$3 } /^    service: https:\/\// { s=$2; if (s ~ tld"$") { print h; exit } }' "$CONF")"
 			if [ -n "$example" ]; then
 				label="${example%%.*}"; zone="${example#*.}"

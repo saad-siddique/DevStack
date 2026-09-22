@@ -48,7 +48,9 @@ MySQL 8.4 · Mailpit · Redis · Memcached · WP-CLI · phpMyAdmin · one global
 
 - An Apple Silicon Mac on macOS 14 or newer. Paths assume `/opt/homebrew`; Intel Macs are not supported.
 - [Homebrew](https://brew.sh).
-- Xcode Command Line Tools (`xcode-select --install`) or Xcode. Either one builds the app.
+- Xcode Command Line Tools (`xcode-select --install`) or Xcode. Either one builds the app. If you install Xcode,
+  open it once and accept its licence (or run `sudo xcodebuild -license accept`); until then `bin/app` notices that
+  Xcode is not ready, says so, and builds with the Command Line Tools instead.
 - An administrator account. `bootstrap.sh` asks for your password twice: once so Valet can install its `.test` DNS
   resolver, once for `valet trust`, which lets `brew services` and `valet` run without a password afterwards.
 - Ports 80, 443, 3306, 1025, 8025, 6379 and 11211 free. Quit MAMP, stop LocalWP's router (or switch it to
@@ -238,12 +240,11 @@ untouched, so your LocalWP credentials still work, and so does `devstack login c
 **From another DevStack machine.** Back up the site there (⋯ → Back up now), copy the stamped folder over, Import…
 it here. The manifest carries the PHP version.
 
-**From MAMP or MAMP PRO on the same machine.** Fill `sites.tsv` (host, folder, PHP, MAMP database, protected flag)
-and run `devstack migrate <host>` per site or `devstack migrate-all`. Each site's database is copied out of MAMP's
-MySQL on port 8889 into MySQL 8.4 and its URLs rewritten; MAMP's copy is never touched, so the rollback is "start
-MAMP". `devstack mamp-backout` removes MAMP's hosts entries, helper daemon and shell hooks once you are done. The
-`sites.tsv` in this repo is the author's inventory; replace it with yours. The full runbook is
-`docs/mamp-to-valet-migration-handoff-v2.md`.
+**From MAMP or MAMP PRO on the same machine.** Copy `sites.tsv` to `sites.local.tsv` (git-ignored), list your hosts
+(host, folder, PHP, MAMP database, protected flag) and run `devstack migrate <host>` per site or `devstack
+migrate-all`. Each site's database is copied out of MAMP's MySQL on port 8889 into MySQL 8.4 and its URLs rewritten;
+MAMP's copy is never touched, so the rollback is "start MAMP". `devstack mamp-backout` removes MAMP's hosts entries,
+helper daemon and shell hooks once you are done. Details in `docs/migrating-from-mamp.md`.
 
 **Not WordPress.** `devstack new tool --empty` links an empty folder with a placeholder `index.php`. For anything
 already on disk: `cd ~/Sites/<folder> && valet link && valet secure`. Valet serves Laravel, plain PHP and static
@@ -263,7 +264,7 @@ sites with its built-in drivers.
 
 ## Protected sites
 
-Mark a site `protected=yes` in `sites.tsv` and the tooling will not remove it (`devstack remove` and the app refuse),
+Mark a site `protected=yes` in `sites.local.tsv` and the tooling will not remove it (`devstack remove` and the app refuse),
 will not batch-migrate it, and will only migrate it with an explicit backup flag. Backups are still allowed; they are
 read-only on the site.
 
@@ -283,8 +284,8 @@ public URL through Cloudflare, detached, until you stop it:
 
 - **A hostname on your zone (the reliable path).** If `~/.cloudflared/config.yml` has an ingress rule whose
   `service` is `https://<site>.test`, the named tunnel runs and that hostname is the URL. A site without a rule gets
-  one automatically: the hostname follows the pattern of the rules already there (`saad-wp.example.com` becomes
-  `saad-<site>.example.com`; override with `share_hostname_pattern` in `~/.local/share/devstack/settings.json`,
+  one automatically: the hostname follows the pattern of the rules already there (`dev-wp.example.com` becomes
+  `dev-<site>.example.com`; override with `share_hostname_pattern` in `~/.local/share/devstack/settings.json`,
   `{site}` as placeholder), the rule is written with the right host header and `noTLSVerify`, and `cloudflared tunnel
   route dns` creates the DNS record. Stable URLs, so webhooks configured once at Zapier or Stripe keep working.
   `--hostname H` picks the name by hand. Note that the named tunnel serves every hostname in the file at once: while
@@ -449,8 +450,8 @@ bin/                  THE CONTRACT — devstack (dispatcher)  site-new  site-imp
 completions/          zsh completion for devstack
 app/                  DevStack.app: SwiftUI MenuBarExtra + Swift Charts, Swift Package; only ever runs `devstack …`
                       Icon.svg is the single icon source (app icon, menu-bar template images, dashboard favicon)
-sites.tsv             MAMP migration inventory (host, folder, php, db, protected, notes) — yours, not ours
-docs/                 the MAMP-to-Valet handoff, build records (docs/superpowers/plans), screenshots (docs/img)
+sites.tsv             example inventory; your real one goes in sites.local.tsv (git-ignored)
+docs/                 migrating-from-mamp.md, screenshots (docs/img); docs/private/ is git-ignored for your own runbooks
 ```
 
 - No Docker for WordPress. Homebrew formulae and native binaries only.

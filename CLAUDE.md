@@ -1,7 +1,10 @@
 # CLAUDE.md — DevStack
 
-Read `docs/mamp-to-valet-migration-handoff-v2.md` before changing anything; it is the spec and holds the
-live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas (section 9).
+Read `README.md` first: it documents every command, the guards and the things learned the hard way. The MAMP
+migration is described in `docs/migrating-from-mamp.md`; the real site inventory lives in the git-ignored
+`sites.local.tsv` (the committed `sites.tsv` is an example) and internal runbooks in the git-ignored `docs/private/`.
+The repo is public: never commit site names, database names, hostnames, tokens or screenshots of real data
+(`devstack app snapshot` renders fixtures for a reason).
 
 ## Conventions
 - KISS first. Bash for `bin/*` (`set -euo pipefail`, `--json` flag on every command, exit non-zero on failure).
@@ -21,9 +24,9 @@ live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas 
   in `bin/lib.sh` copies all of them, so a new one needs no wiring.
 
 ## Hard rules
-- `uncanny-automator` is a protected site (handoff 6.1): `migrate-all` skips it; `migrate-site` refuses without
-  the explicit backup flag. Do not weaken this.
-- `automator-platform` is out of scope (Docker-only). Do not link, park or list it.
+- Sites marked `protected=yes` in `sites.local.tsv` are never removed, archived or batch-migrated; `migrate-site`
+  refuses them without the explicit backup flag. Do not weaken this.
+- Docker-only applications that happen to live under ~/Sites are out of scope: never link, park or list them.
 - `site-remove` (and the app's Remove) must keep refusing protected sites; `site-backup` is the one write-free command
   allowed on them.
 - Do not uninstall or modify MAMP while any site still depends on it; the rollback is "start MAMP".
@@ -33,4 +36,7 @@ live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas 
 - Homebrew has `arm64_golden_gate` bottles for php@8.4, nginx, dnsmasq, mysql@8.4, mailpit; `shivammathur/php`
   provides php@7.4 with bottles (`brew trust shivammathur/php` required).
 - Valet 4.12.0 needs the IPv6 `listen [::1]` workaround (handoff 9.7) until the next release.
-- The macOS 27 ObjC fork crash affects MAMP php-cgi, not Homebrew php-fpm (handoff 9.1).
+- The macOS 27 ObjC fork crash affects MAMP php-cgi, not Homebrew php-fpm.
+- Xcode.app may be installed but unusable until its licence is accepted; `bin/app` checks
+  `xcodebuild -checkFirstLaunchStatus` and falls back to the Command Line Tools, which build everything except that
+  the SDK's `@State` macro plugin is missing (hence the `FormModel` pattern in `app/`).

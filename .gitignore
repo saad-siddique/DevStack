@@ -16,3 +16,7 @@ Certificates/
 
 # menu-bar app build output
 app/build/
+
+# Machine-local, never public: the real site inventory and the internal migration runbooks
+sites.local.tsv
+docs/private/

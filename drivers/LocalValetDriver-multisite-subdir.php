@@ -10,7 +10,7 @@ use Valet\Drivers\Specific\WordPressValetDriver;
 class LocalValetDriver extends WordPressValetDriver {
 
 	/**
-	 * Strip the sub-site prefix from core paths: /automator/wp-admin/x -> /wp-admin/x
+	 * Strip the sub-site prefix from core paths: /blog/wp-admin/x -> /wp-admin/x
 	 */
 	private function strip_subsite_prefix( string $uri ): string {
 		$uri = preg_replace( '#^/[_0-9a-zA-Z-]+(/wp-(content|admin|includes)/.*)$#', '$1', $uri );

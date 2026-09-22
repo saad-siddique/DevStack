@@ -99,7 +99,7 @@ if [ "0" = "$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.SCHEMATA 
 		[ "$old_n" = "$new_n" ] || die "base table count mismatch after import: MAMP=$old_n new=$new_n"
 		qv="SELECT COUNT(*) FROM information_schema.VIEWS WHERE TABLE_SCHEMA='$SITE_DB'"
 		old_v="$(mysql_old -N -e "$qv")"; new_v="$(mysql_new -N -e "$qv")"
-		[ "$old_v" = "$new_v" ] || log "warning: $((old_v - new_v)) broken view(s) not imported (Automator recreates its *_logs_view on load)"
+		[ "$old_v" = "$new_v" ] || log "warning: $((old_v - new_v)) broken view(s) not imported (plugins that own views usually recreate them on load)"
 		step_db="imported $new_n tables, $new_v views"
 	fi
 fi

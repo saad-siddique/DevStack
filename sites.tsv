@@ -1,26 +1,12 @@
 # host	folder	php	db	protected	notes
-# Source of truth for bin/migrate-site and bin/migrate-all. localhost and automator-platform are deliberately absent.
-uncanny-automator	uncanny-automator	php@8.4	uo_uncanny-automator	yes	primary dev site; codeception test_ tables in same DB
-automator-plugin-platform	uncanny_automator_plugin_platform	php@8.4	uo_automator-plugin-platform	no	folder != host
-automatorplugin	automatorplugin	php@8.4	wp_automatorplugin	no	
-automator-app-dev	automator-app-dev	php@8.4	wp_automator-app-dev	no	
-automator-docs	automator-docs	php@7.4	wp_automator-docs	no	7.4
-elearning-docs	elearning-docs	php@7.4	wp_elearning-docs	no	7.4
-clean-automator	clean-automator	php@7.4	wp_cleanautomator_db	no	7.4 compat testing; PILOT
-cleantest	cleantest	php@8.4	wp_cleantest_db	no	PILOT
-elearning-plugins	elearning-plugins	php@8.4	wp_elearningplugins_db	no	
-hrpartner	hrpartner	php@8.4	wp_hrpartner_db	no	
-lindris	lindris	php@8.4	wp_lindris_db	no	
-tincanny	tincanny	php@8.4	tinstaging2	no	
-tincanny-core	tincanny-core	php@8.4	tincanny-core	no	
-uncanny-ceu	uncanny-ceu	php@8.4	uo_uncanny-ceu	no	
-uncanny-codes	uncanny-codes	php@8.4	uo_uncanny-codes	no	
-uncanny-groups	uncanny-groups	php@8.4	uo_uncanny-groups	no	
-uncanny-toolkit	uncanny-toolkit	php@8.4	uo_uncanny-toolkit	no	
-uncannyowl	uncannyowl	php@8.4	dbusfoxzdgjkec	no	prod copy
-unito	unito	php@8.4	wp_unito_db	no	
-wpmu	wpmu	php@8.4	wp_wpmu_db	no	subdirectory multisite; needs LocalValetDriver
-automator-api	automator-api	php@8.4	-	no	Laravel
-uo-ap-edd-licensing	uo-ap-edd-licensing	php@8.4	-	no	PHP app, public/
-basecamp	basecamp	php@8.4	-	no	static export
-learndash-docs	learndsah-docs	php@8.4	-	no	folder != host; static
+# Inventory for `devstack migrate` (MAMP → Valet) and the protected-site list. This file is an example: copy it to
+# sites.local.tsv (git-ignored) and fill in your sites; sites.local.tsv wins when it exists.
+#   host       = the site name: https://<host>.test and the Valet link name
+#   folder     = directory under ~/Sites (usually the same as host)
+#   php        = php@X.Y the site runs on (7.4 … 8.6)
+#   db         = the MAMP database to copy, or - for a site without WordPress
+#   protected  = yes shields a site from remove/archive and from batch migration (restore only while absent)
+example-shop	example-shop	php@8.4	wp_example_shop	no	
+legacy-docs	legacy-docs	php@7.4	wp_legacy_docs	no	still needs PHP 7.4
+client-prod-copy	client-prod-copy	php@8.4	client_db	yes	protected: tooling never removes it
+landing	landing	php@8.4	-	no	static export, link and secure only

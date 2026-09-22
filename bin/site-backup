@@ -99,7 +99,7 @@ if [ "1" = "$DB" ] && [ -f "$SITE_PATH/wp-config.php" ]; then
 	n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$(sql_quote "$db_name")' AND TABLE_TYPE='BASE TABLE'")"
 	[ "$n_tables" -gt 0 ] || die "database $db_name has no tables (wrong wp-config?)"
 	log "db: dumping $db_name ($n_tables tables)"
-	# --force: a stale VIEW must not abort the dump (Automator recreates its views); --no-tablespaces: no PROCESS privilege noise.
+	# --force: a stale VIEW must not abort the dump (plugins that own views recreate them on load); --no-tablespaces: no PROCESS privilege noise.
 	"$BREW_PREFIX/opt/mysql@8.4/bin/mysqldump" -uroot --single-transaction --quick --routines --triggers --events --force --no-tablespaces --set-gtid-purged=OFF "$db_name" \
 		2> >(grep -v 'Using a password' >&2) | gzip > "$DEST/db.sql.gz"
 	[ -s "$DEST/db.sql.gz" ] || die "empty dump"

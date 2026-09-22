@@ -6,7 +6,8 @@ set -euo pipefail
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAMP' | paste -sd: -)"; export PATH
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITES_DIR="${SITES_DIR:-$HOME/Sites}"
-SITES_TSV="${SITES_TSV:-$REPO_DIR/sites.tsv}"
+# sites.tsv is the committed example; sites.local.tsv (git-ignored) holds the real inventory when it exists.
+if [ -z "${SITES_TSV:-}" ]; then SITES_TSV="$REPO_DIR/sites.tsv"; [ -f "$REPO_DIR/sites.local.tsv" ] && SITES_TSV="$REPO_DIR/sites.local.tsv"; fi
 DATA_DIR="${DATA_DIR:-$HOME/.local/share/devstack}"   # phpMyAdmin, upgrades.json
 LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/DevStack}"   # command logs; migrate-site also parks its pre-migration dumps here
 VALET_HOME="${VALET_HOME:-$HOME/.config/valet}"
