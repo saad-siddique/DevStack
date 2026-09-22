@@ -176,10 +176,9 @@
 		rows.forEach( function ( site ) {
 			var host = site.name + '.test';
 			var php = 'default' === site.php ? '8.4' : site.php;
+			// The name column already opens the site; this column is wp-admin only (empty for PHP/static sites).
 			var open = el( 'td', {} );
-			open.appendChild( el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: 'Site' } ) );
 			if ( site.wp ) {
-				open.appendChild( document.createTextNode( '  ' ) );
 				open.appendChild( el( 'a', { href: 'https://' + host + '/wp-admin/', target: '_blank', rel: 'noopener', text: 'wp-admin' } ) );
 			}
 			tbody.appendChild( el( 'tr', {}, [
