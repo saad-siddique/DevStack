@@ -43,6 +43,7 @@ enum Devstack {
 		env["TERM"] = "dumb"
 		env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
 		env["NO_COLOR"] = "1"
+		env["DEVSTACK_FROM_APP"] = "1"        // bin/update: leave the app rebuild to us, we relaunch ourselves
 		p.environment = env
 		p.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
 		return p

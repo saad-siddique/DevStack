@@ -17,6 +17,9 @@ struct PanelView: View {
 			if let msg = state.errorMessage {
 				ErrorLine(message: msg) { state.errorMessage = nil }.padding(.horizontal, 14).padding(.bottom, 8)
 			}
+			if let u = state.update, u.isAvailable {
+				UpdateLine(info: u) { state.runUpdate() }.padding(.horizontal, 14).padding(.bottom, 8)
+			}
 			quickOpen.padding(.horizontal, 14).padding(.bottom, 10)
 			UsageChart(sampler: state.sampler).padding(.horizontal, 14)
 			Picker("Section", selection: $tab) {
@@ -61,6 +64,8 @@ struct PanelView: View {
 				Button("Open Sites folder") { state.openFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Sites").path) }
 				Divider()
 				Toggle("Start at login", isOn: Binding(get: { state.launchAtLogin }, set: { state.setLaunchAtLogin($0) }))
+				Button(state.checkingUpdates ? "Checking for updates…" : "Check for updates") { Task { await state.checkForUpdates() } }
+					.disabled(state.checkingUpdates)
 				Divider()
 				Button("Quit DevStack") { NSApp.terminate(nil) }
 			} label: {

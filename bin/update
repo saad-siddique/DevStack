@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# update [--check] [--app] [--json]
+# --check : fetch origin and report how far behind this clone is. Changes nothing. Safe to run on a timer.
+# (none)  : git pull --ff-only, then bootstrap.sh. Rebuilds the app when app/ or bin/app changed and the app is
+#           installed (or always with --app). With DEVSTACK_FROM_APP=1 the app rebuild is left to the caller, because
+#           the caller *is* the app and relaunches itself afterwards.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+CHECK=0 ; APP=0 ; JSON=0
+for arg in "$@"; do
+	case "$arg" in
+		--check) CHECK=1 ;; --app) APP=1 ;; --json) JSON=1 ;;
+		*) die "usage: update [--check] [--app] [--json]" ;;
+	esac
+done
+cd "$REPO_DIR"
+export GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=8"
+branch="$(git rev-parse --abbrev-ref HEAD)"
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2> /dev/null || true)"
+[ -n "$upstream" ] || die "branch $branch has no upstream; nothing to pull from"
+dirty=false; [ -z "$(git status --porcelain --untracked-files=no)" ] || dirty=true
+app_changed() { [ -n "$(git diff --name-only "$1" "$2" -- app bin/app 2> /dev/null)" ]; }
+
+if [ "1" = "$CHECK" ]; then
+	if ! git fetch -q origin 2> /dev/null; then
+		[ "1" = "$JSON" ] && jq -n --arg b "$branch" '{branch:$b,behind:null,reachable:false,error:"cannot reach origin"}' || log "cannot reach origin"
+		exit 1
+	fi
+	behind="$(git rev-list --count "HEAD..$upstream")"
+	changed=false; [ "$behind" -gt 0 ] && app_changed HEAD "$upstream" && changed=true
+	commits="$(git log --format='%h %s' "HEAD..$upstream" | head -20 | jq -R . | jq -s .)"
+	if [ "1" = "$JSON" ]; then
+		jq -n --arg b "$branch" --arg u "$upstream" --argjson behind "$behind" --argjson app "$changed" --argjson dirty "$dirty" --argjson c "$commits" \
+			'{branch:$b,upstream:$u,behind:$behind,app_changed:$app,dirty:$dirty,reachable:true,commits:$c,checked_at:(now|todate)}'
+	elif [ "$behind" -eq 0 ]; then echo "up to date ($branch @ $(git rev-parse --short HEAD))"
+	else
+		echo "$behind commit(s) behind $upstream$([ true = "$changed" ] && echo ', app changed')$([ true = "$dirty" ] && echo ', local changes will block the pull'):"
+		echo "$commits" | jq -r '.[] | "  " + .'
+	fi
+	exit 0
+fi
+
+old="$(git rev-parse HEAD)"
+log "git pull --ff-only ($branch)"
+git pull --ff-only >&2 || die "pull failed; run 'git status' in $REPO_DIR (local changes or a diverged branch)"
+new="$(git rev-parse HEAD)"
+changed=false; [ "$old" != "$new" ] && app_changed "$old" "$new" && changed=true
+rebuild=false
+if [ "1" = "$APP" ] || { [ true = "$changed" ] && [ -d /Applications/DevStack.app ] && [ "1" != "${DEVSTACK_FROM_APP:-0}" ]; }; then rebuild=true; fi
+args=(); [ true = "$rebuild" ] && args+=(--app)
+"$REPO_DIR/bootstrap.sh" "${args[@]+"${args[@]}"}" >&2
+if [ "1" = "$JSON" ]; then
+	jq -n --arg from "$old" --arg to "$new" --argjson updated "$([ "$old" != "$new" ] && echo true || echo false)" --argjson app "$changed" --argjson rebuilt "$rebuild" \
+		'{from:$from,to:$to,updated:$updated,app_changed:$app,app_rebuilt:$rebuilt,ok:true}'
+else
+	if [ "$old" = "$new" ]; then echo "already up to date ($(git rev-parse --short HEAD))"; else echo "updated $(git rev-parse --short "$old") -> $(git rev-parse --short "$new")$([ true = "$changed" ] && [ false = "$rebuild" ] && echo ' (app changed: run devstack app install)')"; fi
+fi

@@ -48,6 +48,8 @@ final class AppState: ObservableObject {
 	@Published var modal: Modal?
 	@Published var task = TaskLog()
 	@Published private(set) var panelOpen = false
+	@Published private(set) var update: UpdateInfo?
+	@Published private(set) var checkingUpdates = false
 
 	let sampler = UsageSampler()
 	let installed = Devstack.isInstalled
@@ -61,6 +63,7 @@ final class AppState: ObservableObject {
 		if !installed { errorMessage = Devstack.Failure.notInstalled.localizedDescription }
 		Task { await refresh() }
 		schedule()
+		scheduleUpdateChecks()
 	}
 
 	var health: Health {
@@ -121,11 +124,50 @@ final class AppState: ObservableObject {
 		}
 	}
 
+	func setUpdate(_ info: UpdateInfo?) { update = info }   // snapshot fixtures only
+
 	func freeze(with fixture: StackStatus) {
 		frozen = true
 		status = fixture
 		lastUpdated = Date()
 		errorMessage = nil
+	}
+
+	// MARK: updates (a fetch every six hours; applying is always a click)
+
+	private var updateLoop: Task<Void, Never>?
+
+	private func scheduleUpdateChecks() {
+		guard installed else { return }
+		updateLoop = Task { [weak self] in
+			try? await Task.sleep(for: .seconds(20))
+			while !Task.isCancelled {
+				await self?.checkForUpdates()
+				try? await Task.sleep(for: .seconds(6 * 3600))
+			}
+		}
+	}
+
+	func checkForUpdates() async {
+		guard installed, !frozen, !checkingUpdates else { return }
+		checkingUpdates = true
+		defer { checkingUpdates = false }
+		// Silent on failure: no network or no upstream is not worth a red line in the panel.
+		update = try? await Devstack.runJSON(UpdateInfo.self, ["update", "--check", "--json"])
+	}
+
+	func runUpdate() { runJob(title: "Update DevStack", ["update", "--json"]) }
+
+	/// The app cannot replace itself while running: hand the rebuild to a detached `devstack app install`, which
+	/// builds, installs into /Applications and relaunches, then quit.
+	func restartAfterUpdate() {
+		let p = Process()
+		p.executableURL = URL(fileURLWithPath: "/bin/bash")
+		let log = NSHomeDirectory() + "/Library/Logs/DevStack/app-install.log"
+		p.arguments = ["-c", "sleep 1; PATH=/opt/homebrew/bin:/usr/bin:/bin /opt/homebrew/bin/devstack app install > '\(log)' 2>&1"]
+		try? FileManager.default.createDirectory(atPath: (log as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+		do { try p.run() } catch { errorMessage = "Could not start the rebuild: \(error.localizedDescription)"; return }
+		NSApp.terminate(nil)
 	}
 
 	// MARK: quick actions (a few seconds; the row shows a spinner)
@@ -187,6 +229,7 @@ final class AppState: ObservableObject {
 				Task { @MainActor in self?.task.lines.append(line) }
 			}
 			task.finish(status)
+			if args.first == "update", status == 0 { update = nil }
 			await refresh()
 		}
 	}

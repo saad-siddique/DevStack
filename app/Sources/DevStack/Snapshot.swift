@@ -20,6 +20,10 @@ enum Snapshot {
 		state.sampler.start()
 		try? await Task.sleep(for: .seconds(7))          // a few load samples so the chart has a line
 		await capture(PanelView().environmentObject(state), "panel", dir)
+		state.setUpdate(UpdateInfo(behind: 3, appChanged: true, dirty: false, reachable: true,
+		                           commits: ["a1b2c3d Import: accept .sql.gz dumps", "b2c3d4e App: Xdebug switch per PHP version", "c3d4e5f README: LocalWP export steps"]))
+		await capture(PanelView().environmentObject(state), "panel-update", dir)
+		state.setUpdate(nil)
 		state.modal = .newSite
 		await capture(ModalView().environmentObject(state), "new-site", dir)
 		state.modal = .importSite
@@ -34,7 +38,7 @@ enum Snapshot {
 		                             "12:28:39 files: cloned 10546 files", "12:28:39 done: ~/Backups/DevStack/acme-shop/20260922-122836 (264M on disk)"]
 		                        .map { Devstack.Line(isError: true, text: $0) },
 		                     running: false, exitStatus: 0,
-		                     result: JobResult(name: "acme-shop", url: nil, path: NSHomeDirectory() + "/Backups/DevStack/acme-shop/20260922-122836", adminUser: nil, adminPassword: nil, ok: true))
+		                     result: JobResult(name: "acme-shop", url: nil, path: NSHomeDirectory() + "/Backups/DevStack/acme-shop/20260922-122836", adminUser: nil, adminPassword: nil, ok: true, to: nil, updated: nil, appChanged: nil, appRebuilt: nil))
 		state.modal = .task
 		await capture(ModalView().environmentObject(state), "task", dir)
 		print("snapshots written to \(dir)")

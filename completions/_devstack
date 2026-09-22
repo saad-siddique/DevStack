@@ -30,6 +30,7 @@ _devstack() {
 		logs) local -a src; src=( list nginx php php-fpm mysql redis mailpit prune wp crashes clear ); (( CURRENT == 3 )) && _describe 'source' src || _devstack_sites ;;
 		app) local -a a; a=( build install open uninstall status ); _describe 'action' a ;;
 		bootstrap) _arguments '--app' ;;
+		update) _arguments '--check' '--app' '--json' ;;
 	esac
 }
 _devstack "$@"

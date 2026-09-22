@@ -319,6 +319,15 @@ struct TaskView: View {
 					Button("Show in Finder") { state.openFolder(p) }.controlSize(.small)
 				}
 			}
+			if let to = r.to {
+				HStack(spacing: 8) {
+					Text((r.updated ?? false) ? "Updated to \(to.prefix(7))." : "Already up to date (\(to.prefix(7))).").font(.callout)
+					if r.appNeedsRestart {
+						Text("The app itself changed.").font(.callout).foregroundStyle(.secondary)
+						Button("Rebuild and restart DevStack") { state.restartAfterUpdate() }.controlSize(.small)
+					}
+				}
+			}
 		}
 		.padding(10)
 		.frame(maxWidth: .infinity, alignment: .leading)

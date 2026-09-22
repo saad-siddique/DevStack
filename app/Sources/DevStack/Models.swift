@@ -89,7 +89,7 @@ struct Site: Decodable, Identifiable, Equatable, Hashable {
 struct MySQLInfo: Decodable { let version: String?; let qps: Double? }
 struct MailInfo: Decodable { let backend: String?; let total: Int? }
 
-/// What site-new / site-import / site-backup print with --json (only the fields the app shows).
+/// What site-new / site-import / site-backup / update print with --json (only the fields the app shows).
 struct JobResult: Decodable {
 	let name: String?
 	let url: String?
@@ -97,4 +97,20 @@ struct JobResult: Decodable {
 	let adminUser: String?
 	let adminPassword: String?
 	let ok: Bool?
+	// update
+	let to: String?
+	let updated: Bool?
+	let appChanged: Bool?
+	let appRebuilt: Bool?
+	var appNeedsRestart: Bool { (updated ?? false) && (appChanged ?? false) && !(appRebuilt ?? false) }
+}
+
+/// `devstack update --check --json`
+struct UpdateInfo: Decodable {
+	let behind: Int?
+	let appChanged: Bool?
+	let dirty: Bool?
+	let reachable: Bool?
+	let commits: [String]?
+	var isAvailable: Bool { (behind ?? 0) > 0 }
 }

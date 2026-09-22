@@ -234,9 +234,16 @@ new name. `devstack remove --backup` refuses to delete anything when the backup 
 
 ## Updating and uninstalling
 
+The app checks the repo's origin once every six hours (and 20 seconds after launch). When commits are waiting it
+shows an **Update available** line with the count and the newest commit; **Update** pulls, re-runs `bootstrap.sh`
+and streams the log into the task window. If `app/` changed, a **Rebuild and restart DevStack** button finishes the
+job. Nothing is ever applied without that click: an unattended pull could restart php-fpm under a debugging session
+or break every teammate at once on a bad push. From the terminal:
+
 ```bash
-devstack update                 # git pull --ff-only, then bootstrap.sh
-devstack app install            # rebuild and relaunch the app after app/ changed
+devstack update --check         # fetch and report (safe on a timer)
+devstack update                 # git pull --ff-only, then bootstrap.sh; rebuilds the app when app/ changed
+devstack app install            # rebuild and relaunch the app by hand
 ```
 
 To remove DevStack (sites in `~/Sites` and databases under `/opt/homebrew/var/mysql` stay until you delete them):

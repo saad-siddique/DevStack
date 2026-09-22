@@ -40,6 +40,31 @@ struct ErrorLine: View {
 	}
 }
 
+/// "Update available" with the commit count and one button; the update itself always runs in the task window.
+struct UpdateLine: View {
+	let info: UpdateInfo
+	let update: () -> Void
+	var body: some View {
+		HStack(alignment: .firstTextBaseline, spacing: 6) {
+			Image(systemName: "arrow.down.circle.fill").foregroundStyle(Color.accentColor)
+			VStack(alignment: .leading, spacing: 1) {
+				Text("Update available: \(info.behind ?? 0) commit\((info.behind ?? 0) == 1 ? "" : "s")\((info.appChanged ?? false) ? ", app changed" : "")")
+					.font(.caption.weight(.medium))
+				if let first = info.commits?.first {
+					Text(first.replacingOccurrences(of: #"^[0-9a-f]+ "#, with: "", options: .regularExpression)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+				}
+				if info.dirty ?? false {
+					Text("Local changes in the repo will block the pull.").font(.caption2).foregroundStyle(.orange)
+				}
+			}
+			Spacer(minLength: 6)
+			Button("Update", action: update).controlSize(.small)
+		}
+		.padding(.horizontal, 10).padding(.vertical, 6)
+		.background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+	}
+}
+
 /// Summed CPU of php-fpm, nginx, mysqld, redis, memcached, mailpit and dnsmasq over the last three minutes.
 struct UsageChart: View {
 	@ObservedObject var sampler: UsageSampler

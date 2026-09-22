@@ -38,7 +38,7 @@ Stack
 
 Repo
   devstack bootstrap [--app]                    (re)install the stack; --app also builds the menu-bar app
-  devstack update                               git pull + bootstrap
+  devstack update [--check] [--app]             git pull + bootstrap (rebuilds the app when app/ changed); --check only reports
   devstack app build|install|open|uninstall|status
   devstack path                                 print the repo directory
 
@@ -74,7 +74,7 @@ case "$cmd" in
 	migrate)             exec "$BIN/migrate-site" "$@" ;;
 	open)                open_target "$@" ;;
 	bootstrap)           exec "$REPO/bootstrap.sh" "$@" ;;
-	update)              git -C "$REPO" pull --ff-only && exec "$REPO/bootstrap.sh" "$@" ;;
+	update)              exec "$BIN/update" "$@" ;;
 	path)                echo "$REPO" ;;
 	version|--version|-V) printf 'devstack %s (%s)\n' "$(git -C "$REPO" describe --tags --always --dirty 2> /dev/null || echo dev)" "$REPO" ;;
 	help|-h|--help)      usage ;;
