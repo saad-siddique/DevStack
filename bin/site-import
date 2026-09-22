@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # site-import <name> <source> [--sql file.sql] [--php 8.4|7.4] [--json]
-# <source>: a LocalWP export .zip, any .zip holding a WordPress root, or a folder. The WordPress root is the
-# directory containing wp-config.php; the database dump is --sql or the largest *.sql found in the source.
+# <source>: a LocalWP export .zip, any .zip holding a WordPress root, a folder, or a site-backup folder. The WordPress
+# root is the directory containing wp-config.php; the dump is --sql or the largest *.sql / *.sql.gz in the source.
+# A site-backup manifest.json supplies the PHP version when --php is not given.
 # Result: https://<name>.test with its own database (wp_<name>), DB user, DB_HOST 127.0.0.1, URLs rewritten, HTTPS.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-NAME="" ; SRC="" ; SQL="" ; PHPV="$DEFAULT_PHP" ; JSON=0
+NAME="" ; SRC="" ; SQL="" ; PHPV="" ; JSON=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--sql) SQL="$2"; shift ;; --sql=*) SQL="${1#--sql=}" ;;
@@ -18,8 +19,10 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$NAME" ] && [ -n "$SRC" ] || die "usage: site-import <name> <export.zip|folder> [--sql dump.sql] [--php 8.4|7.4] [--json]"
 [[ "$NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "name must be lowercase letters, digits and dashes"
-case "$PHPV" in php@*) ;; *) PHPV="php@$PHPV" ;; esac
 [ -e "$SRC" ] || die "source not found: $SRC"
+if [ -z "$PHPV" ] && [ -f "$SRC/manifest.json" ]; then PHPV="$(jq -r '.php // empty' "$SRC/manifest.json")"; fi
+PHPV="${PHPV:-$DEFAULT_PHP}"
+case "$PHPV" in php@*) ;; *) PHPV="php@$PHPV" ;; esac
 SITE_PATH="$SITES_DIR/$NAME"; URL="https://$NAME.$TLD"
 [ ! -e "$SITE_PATH" ] || die "$SITE_PATH already exists"
 [ ! -L "$VALET_HOME/Sites/$NAME" ] || die "Valet already has a site named $NAME"
@@ -38,8 +41,9 @@ trap '[ -n "$TMP" ] && rm -rf "$TMP"' EXIT
 WP_ROOT="$(find "$WORK" -maxdepth 4 -name wp-config.php -not -path '*/node_modules/*' 2> /dev/null | head -1 | xargs -I{} dirname {} || true)"
 [ -n "$WP_ROOT" ] || WP_ROOT="$(find "$WORK" -maxdepth 4 -name wp-settings.php 2> /dev/null | head -1 | xargs -I{} dirname {} || true)"
 [ -n "$WP_ROOT" ] || die "no WordPress root (wp-config.php / wp-settings.php) found under $SRC"
-if [ -z "$SQL" ]; then SQL="$(find "$WORK" -maxdepth 4 -name '*.sql' 2> /dev/null | xargs -I{} stat -f '%z %N' {} 2> /dev/null | sort -rn | head -1 | cut -d' ' -f2- || true)"; fi
-[ -n "$SQL" ] && [ -f "$SQL" ] || die "no .sql dump found (pass --sql file.sql)"
+if [ -z "$SQL" ]; then SQL="$(find "$WORK" -maxdepth 4 \( -name '*.sql' -o -name '*.sql.gz' \) 2> /dev/null | xargs -I{} stat -f '%z %N' {} 2> /dev/null | sort -rn | head -1 | cut -d' ' -f2- || true)"; fi
+[ -n "$SQL" ] && [ -f "$SQL" ] || die "no .sql / .sql.gz dump found (pass --sql file.sql)"
+read_sql() { case "$SQL" in *.gz) gzip -dc "$SQL" ;; *) cat "$SQL" ;; esac; }
 log "wordpress root: $WP_ROOT"; log "sql dump: $SQL ($(du -h "$SQL" | cut -f1))"
 
 # 3. Files.
@@ -57,7 +61,7 @@ if [ -z "$DB_USER" ] || [ "root" = "$DB_USER" ]; then DB_USER="$DB_NAME"; DB_PAS
 mysql_new -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
 db_ensure_user "$DB_NAME" "$DB_USER" "$DB_PASS"
 # LocalWP dumps may carry CREATE DATABASE/USE for their own schema name; strip so everything lands in $DB_NAME.
-sed -E '/^(CREATE DATABASE|USE )/d' "$SQL" | mysql_new --force "$DB_NAME"
+read_sql | sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$DB_NAME"
 n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$DB_NAME' AND TABLE_TYPE='BASE TABLE'")"
 [ "$n_tables" -gt 0 ] || die "import produced no tables"
 log "db: $DB_NAME ($n_tables tables), user $DB_USER"

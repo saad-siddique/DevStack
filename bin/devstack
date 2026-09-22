@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# devstack <command> [args...] : the one global entry point for every bin/ script.
+# bootstrap.sh links this file to /opt/homebrew/bin/devstack, so it works from any directory, from IDE terminals
+# and from the menu-bar app (which starts with a bare PATH). Verbs map to bin/ scripts; any bin/ name also works.
+set -euo pipefail
+
+# Follow the symlink back to the repo (readlink may answer with a relative path).
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+	dir="$(cd "$(dirname "$self")" && pwd)"; self="$(readlink "$self")"
+	case "$self" in /*) ;; *) self="$dir/$self" ;; esac
+done
+REPO="$(cd "$(dirname "$self")/.." && pwd)"; BIN="$REPO/bin"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+TLD="${TLD:-test}"
+
+usage() {
+	cat <<USAGE
+devstack — native local WordPress stack (Valet, Homebrew PHP 7.4–8.6, MySQL 8.4, Mailpit, Redis, Memcached)
+
+Sites
+  devstack new <name> [--php 8.2] [--empty]     fresh WordPress at https://<name>.$TLD (prints the admin password once)
+  devstack import <name> <zip|folder> [--php X] LocalWP export, any folder + .sql, or a devstack backup folder
+  devstack backup <name> [--db-only]            ~/Backups/local-devstack/<name>/<stamp>/ (files clone + db.sql.gz)
+  devstack backups [name]                       list backups
+  devstack remove <name> --yes [--backup]       unlink, unsecure, drop database + user, delete folder
+  devstack sites                                every linked site with its PHP version
+  devstack open [dashboard|phpmyadmin|mailpit|<site>]
+  devstack migrate <host> | migrate-all         MAMP → Valet (sites.tsv)
+
+Stack
+  devstack status [--json]                      services, PHP versions, sites, ports, MySQL, mail
+  devstack service <name> start|stop|restart    nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
+  devstack xdebug on|off|status [--php 8.4]     trigger mode, port 9003
+  devstack logs [list|<source>|wp <site>|crashes|clear ...]
+  devstack logs-prune                           rotate now (LaunchAgent does it daily)
+
+Repo
+  devstack bootstrap [--app]                    (re)install the stack; --app also builds the menu-bar app
+  devstack update                               git pull + bootstrap
+  devstack app build|install|open|uninstall|status
+  devstack path                                 print the repo directory
+
+Every command accepts --json where a tool consumes it. Repo: $REPO
+USAGE
+}
+
+open_target() {
+	local t="${1:-dashboard}"
+	case "$t" in
+		dashboard|phpmyadmin) exec open "https://$t.$TLD" ;;
+		mailpit|mail) exec open "http://localhost:8025" ;;
+		--folder|-f) exec open "$HOME/Sites" ;;
+		*) [ -L "$HOME/.config/valet/Sites/$t" ] || { echo "no site named '$t'" >&2; exit 1; }
+		   if [ "${2:-}" = "--folder" ]; then exec open "$(readlink "$HOME/.config/valet/Sites/$t")"; fi
+		   exec open "https://$t.$TLD" ;;
+	esac
+}
+
+cmd="${1:-help}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+	status)              exec "$BIN/stack-status" "$@" ;;
+	new)                 exec "$BIN/site-new" "$@" ;;
+	import)              exec "$BIN/site-import" "$@" ;;
+	remove|rm)           exec "$BIN/site-remove" "$@" ;;
+	backup)              exec "$BIN/site-backup" "$@" ;;
+	backups)             exec "$BIN/site-backup" --list "$@" ;;
+	sites)               exec "$BIN/stack-status" | jq -r '.sites[] | "\(.name)\t\(.php)\t\(if .secured then "https" else "http" end)\t\(if .protected then "protected" else "" end)"' | column -t -s $'\t' ;;
+	xdebug)              exec "$BIN/php-xdebug" "$@" ;;
+	service|svc)         exec "$BIN/service" "$@" ;;
+	logs)                exec "$BIN/logs" "$@" ;;
+	migrate)             exec "$BIN/migrate-site" "$@" ;;
+	open)                open_target "$@" ;;
+	bootstrap)           exec "$REPO/bootstrap.sh" "$@" ;;
+	update)              git -C "$REPO" pull --ff-only && exec "$REPO/bootstrap.sh" "$@" ;;
+	path)                echo "$REPO" ;;
+	version|--version|-V) printf 'devstack %s (%s)\n' "$(git -C "$REPO" describe --tags --always --dirty 2> /dev/null || echo dev)" "$REPO" ;;
+	help|-h|--help)      usage ;;
+	*) if [ -x "$BIN/$cmd" ] && [ "lib.sh" != "$cmd" ]; then exec "$BIN/$cmd" "$@"; fi
+	   echo "devstack: unknown command '$cmd' (devstack help)" >&2; exit 2 ;;
+esac

@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# app build|install|open|uninstall|status|snapshot [DIR] [--sign IDENTITY] [--no-open]
+# Builds the menu-bar app from app/ with Swift Package Manager (Command Line Tools or Xcode, either works),
+# wraps the binary into app/build/DevStack.app and signs it ad hoc — or with --sign / $DEVSTACK_SIGN_IDENTITY
+# ("Developer ID Application: …") once a certificate exists. install copies it to /Applications and relaunches it.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+APP_SRC="$REPO_DIR/app"; BUILD="$APP_SRC/build"; BUNDLE="$BUILD/DevStack.app"; INSTALLED="/Applications/DevStack.app"
+OP="" ; SIGN="${DEVSTACK_SIGN_IDENTITY:--}" ; OPEN=1 ; SNAP_DIR="$REPO_DIR/docs/img"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		build|install|open|uninstall|status|snapshot) OP="$1" ;;
+		--sign) SIGN="$2"; shift ;; --sign=*) SIGN="${1#--sign=}" ;;
+		--no-open) OPEN=0 ;;
+		--*) die "unknown flag $1" ;;
+		*) [ "snapshot" = "$OP" ] && SNAP_DIR="$1" || die "unknown argument $1" ;;
+	esac
+	shift
+done
+[ -n "$OP" ] || die "usage: app build|install|open|uninstall|status|snapshot [DIR] [--sign IDENTITY] [--no-open]"
+
+# Prefer a usable Xcode toolchain (it carries the SwiftUI macro plugins); otherwise the Command Line Tools.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ]; then
+	if DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -checkFirstLaunchStatus > /dev/null 2>&1 \
+	   && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun --find swift > /dev/null 2>&1; then
+		export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+	else
+		log "Xcode.app present but not ready (first launch / license); using the Command Line Tools"
+	fi
+fi
+
+quit_app() { pkill -x DevStack 2> /dev/null && sleep 1 || true; }
+version() { git -C "$REPO_DIR" describe --tags --always --dirty 2> /dev/null || echo 0.1.0; }
+
+build() {
+	xcode-select -p > /dev/null 2>&1 || die "Xcode Command Line Tools missing: xcode-select --install"
+	log "swift build -c release ($(swift --version 2>&1 | head -1 | sed -E 's/.*Swift version ([0-9.]+).*/Swift \1/'))"
+	( cd "$APP_SRC" && swift build -c release 2>&1 | grep -vE 'ld: warning: search path' | tail -3 >&2 )
+	local bin; bin="$(cd "$APP_SRC" && swift build -c release --show-bin-path)/DevStack"
+	[ -x "$bin" ] || die "build produced no binary"
+
+	# App icon: rendered once by Tools/MakeIcon.swift, cached in build/ until the script changes.
+	if [ ! -f "$BUILD/AppIcon.icns" ] || [ "$APP_SRC/Tools/MakeIcon.swift" -nt "$BUILD/AppIcon.icns" ]; then
+		log "rendering AppIcon.icns"
+		rm -rf "$BUILD/AppIcon.iconset"; mkdir -p "$BUILD/AppIcon.iconset"
+		swift "$APP_SRC/Tools/MakeIcon.swift" "$BUILD/AppIcon.iconset" && iconutil -c icns "$BUILD/AppIcon.iconset" -o "$BUILD/AppIcon.icns" \
+			|| log "warning: icon rendering failed; the app will use the generic icon"
+	fi
+
+	rm -rf "$BUNDLE"; mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
+	cp "$bin" "$BUNDLE/Contents/MacOS/DevStack"
+	[ -f "$BUILD/AppIcon.icns" ] && cp "$BUILD/AppIcon.icns" "$BUNDLE/Contents/Resources/AppIcon.icns"
+	local ver build_no; ver="$(version)"; build_no="$(git -C "$REPO_DIR" rev-list --count HEAD 2> /dev/null || echo 1)"
+	sed -e "s/__VERSION__/${ver#v}/" -e "s/__BUILD__/$build_no/" "$APP_SRC/Info.plist" > "$BUNDLE/Contents/Info.plist"
+	printf 'APPL????' > "$BUNDLE/Contents/PkgInfo"
+	if [ "-" = "$SIGN" ]; then
+		codesign --force --deep --sign - "$BUNDLE" 2> /dev/null
+		log "signed ad hoc (locally built apps are not quarantined; nothing to bypass)"
+	else
+		codesign --force --deep --options runtime --timestamp --sign "$SIGN" "$BUNDLE"
+		log "signed with '$SIGN'"
+	fi
+	log "built $BUNDLE ($ver)"
+}
+
+case "$OP" in
+	build) build; echo "$BUNDLE" ;;
+	install)
+		build
+		quit_app
+		rm -rf "$INSTALLED"; cp -R "$BUNDLE" "$INSTALLED"
+		log "installed $INSTALLED"
+		[ "1" = "$OPEN" ] && open -a "$INSTALLED"
+		echo "$INSTALLED" ;;
+	open)
+		if [ -d "$INSTALLED" ]; then open -a "$INSTALLED"; elif [ -d "$BUNDLE" ]; then open -a "$BUNDLE"; else die "not built yet: devstack app install"; fi ;;
+	uninstall)
+		quit_app; rm -rf "$INSTALLED"; log "removed $INSTALLED (build/ kept)" ;;
+	snapshot)
+		[ -x "$BUNDLE/Contents/MacOS/DevStack" ] || build
+		mkdir -p "$SNAP_DIR"
+		"$BUNDLE/Contents/MacOS/DevStack" --snapshot "$SNAP_DIR"
+		ls "$SNAP_DIR"/*.png ;;
+	status)
+		running=false; pgrep -xq DevStack && running=true
+		installed=null; [ -d "$INSTALLED" ] && installed="$(defaults read "$INSTALLED/Contents/Info" CFBundleShortVersionString 2> /dev/null | jq -R .)"
+		jq -n --argjson installed "$installed" --argjson running "$running" --arg repo "$(version)" '{installed_version:$installed, running:$running, repo_version:$repo}' ;;
+esac

@@ -36,7 +36,9 @@ sites="$(for l in "$VALET_HOME"/Sites/*; do
 	fi
 	secured=false; [ -f "$VALET_HOME/Certificates/$n.$TLD.crt" ] && secured=true
 	target="$(readlink "$l")"; wp=false; [ -f "$target/wp-config.php" ] && wp=true
-	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" '{name:$name,php:$php,secured:$secured,wp:$wp,path:$path}'
+	prot=false; is_protected "$n" && prot=true
+	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" --argjson prot "$prot" \
+		'{name:$name,php:$php,secured:$secured,wp:$wp,path:$path,protected:$prot}'
 done | jq -s 'sort_by(.name)')"
 
 # Port owner: when several processes listen (Docker's *:6379 beside Homebrew's 127.0.0.1:6379), prefer the

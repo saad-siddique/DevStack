@@ -13,3 +13,6 @@ app/DerivedData/
 # Valet machine-local state never lives here
 Nginx/
 Certificates/
+
+# menu-bar app build output
+app/build/

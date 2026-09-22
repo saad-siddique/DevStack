@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# local-devstack bootstrap: idempotent. Run it again any time.
+# local-devstack bootstrap [--app]: idempotent. Run it again any time.
 # Needs your sudo password once (valet install / valet trust); after that brew+valet are passwordless.
+# --app also builds the menu-bar app from app/ and installs it to /Applications/DevStack.app.
 set -euo pipefail
+WITH_APP=0; for a in "$@"; do case "$a" in --app) WITH_APP=1 ;; *) echo "unknown flag $a (bootstrap.sh [--app])"; exit 2 ;; esac; done
 
 # Never let a leftover MAMP PATH entry (old shells, IDE terminals) leak into brew/valet/php resolution.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAMP' | paste -sd: -)"; export PATH
@@ -245,6 +247,15 @@ PLIST
 	fi
 }
 
+# The global `devstack` command (bin/devstack) and its zsh completion. A symlink, so `git pull` updates it.
+ensure_cli() {
+	log "devstack command"
+	ln -sfn "$REPO_DIR/bin/devstack" "$BREW_PREFIX/bin/devstack"
+	mkdir -p "$BREW_PREFIX/share/zsh/site-functions"
+	ln -sfn "$REPO_DIR/completions/_devstack" "$BREW_PREFIX/share/zsh/site-functions/_devstack"
+	ok "$BREW_PREFIX/bin/devstack -> bin/devstack (try: devstack help)"
+}
+
 ensure_dashboard() {
 	log "Dashboard"
 	if [ ! -L "$VALET_HOME/Sites/dashboard" ]; then
@@ -266,4 +277,6 @@ ensure_services
 ensure_dashboard
 ensure_phpmyadmin
 ensure_log_pruning
-log "Done. Next: bin/migrate-site <host>  (pilot: cleantest, clean-automator)"
+ensure_cli
+if [ "1" = "$WITH_APP" ]; then log "Menu-bar app"; "$REPO_DIR/bin/app" install; fi
+log "Done. devstack help lists every command; devstack app install builds the menu-bar app."

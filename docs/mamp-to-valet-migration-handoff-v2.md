@@ -265,6 +265,8 @@ Verification per schema: table count and `CHECKSUM TABLE` on the options + posts
 
 **Phase 6 — Decommission MAMP PRO** (step 1 done 2026-09-22 via `bin/mamp-backout`: servers stopped, app quit, helper daemon unloaded and removed, `/etc/hosts` entries removed, shell profiles stripped with a `~/.zshrc` guard; `/Applications/MAMP` and `MAMP PRO.app` kept for the rollback window): stop servers in the app → `sudo launchctl unload /Library/LaunchDaemons/de.appsolute.mampprohelper.plist` → delete the 60-line `# MAMP PRO - Do NOT remove this entry!` block from `/etc/hosts` (bare names never collided with `.test`, but stale) → keep `/Applications/MAMP` and `~/mamp-dump-*.sql` for two weeks as rollback → then trash `/Applications/MAMP`, `/Applications/MAMP PRO.app`, `/Library/Application Support/appsolute`, `~/Library/Application Support/appsolute`.
 
+**Phase 7 — Global command + menu-bar app** — **DONE 2026-09-22**: `bin/devstack` linked to `/opt/homebrew/bin/devstack` with zsh completion (every `bin/` script as a verb, `devstack help`), `bin/site-backup` (APFS clone + `db.sql.gz` + manifest, restorable via `site-import`, `site-remove --backup`), `bin/app` (SwiftPM build, bundle, ad-hoc or `--sign`, install to `/Applications`, `snapshot`), and `app/` DevStack.app (MenuBarExtra: sites/services/PHP with actions, load chart, New/Import/Remove/Task window). Record: `docs/superpowers/plans/2026-09-22-phase7-cli-and-app.md`.
+
 ## 7. Definition of done (updated)
 
 - [x] 24 hosts (everything in section 3 except `localhost`; `automator-platform` is out of scope) answer at `https://<host>.test` with a cert Chrome/Safari accept silently. *(2026-09-22)*
@@ -348,7 +350,7 @@ If it ever appears on the new stack, know these three facts: (a) `OBJC_DISABLE_I
 **Still open**
 1. Date to actually delete `/Applications/MAMP` (only after `uncanny-automator` has run on Valet for a full working week).
 
-## 11. One repo for tooling **and** the Mac app (proposal, not in the migration critical path)
+## 11. One repo for tooling **and** the Mac app (built 2026-09-22 as Phase 7; the README is now the reference — this section is the original proposal)
 
 Yes, fold it in. The scripts are the product; the app is a skin. Layout:
 

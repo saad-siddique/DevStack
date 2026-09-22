@@ -5,6 +5,11 @@ live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas 
 
 ## Conventions
 - KISS first. Bash for `bin/*` (`set -euo pipefail`, `--json` flag on every command, exit non-zero on failure).
+- `bin/devstack` is the public surface: a new `bin/` script gets a verb there, a line in `completions/_devstack`
+  and in the README's command block. Scripts resolve their own paths (`lib.sh`) and never assume the cwd.
+- `app/` (Swift, tabs): the app only ever runs `devstack …` and decodes `--json`; no brew/valet/mysql calls, no
+  `@State` (the SDK macro needs Xcode; use the `FormModel` ObservableObject pattern), no self-activation in unattended
+  code. Check UI changes with `devstack app snapshot` and look at `docs/img/*.png`. Build with `devstack app build`.
 - PHP (`dashboard/`, `drivers/`, `mu-plugins/`): WordPress coding standards, tabs, **Yoda conditions**.
 - Every script must be idempotent and safe to re-run on an already-migrated site.
 - Nothing here ever edits `php.ini` in place; PHP settings go in `php/zz-uo-dev.ini` copied to `conf.d/`.
@@ -14,6 +19,8 @@ live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas 
 - `uncanny-automator` is a protected site (handoff 6.1): `migrate-all` skips it; `migrate-site` refuses without
   the explicit backup flag. Do not weaken this.
 - `automator-platform` is out of scope (Docker-only). Do not link, park or list it.
+- `site-remove` (and the app's Remove) must keep refusing protected sites; `site-backup` is the one write-free command
+  allowed on them.
 - Do not uninstall or modify MAMP while any site still depends on it; the rollback is "start MAMP".
 - No Docker anywhere in this repo.
 

@@ -56,6 +56,12 @@ site_row() {
 # all_hosts : print every host in inventory order.
 all_hosts() { awk -F'\t' '$0 !~ /^#/ && NF >= 5 { print $1 }' "$SITES_TSV"; }
 
+# is_protected <host> : true when sites.tsv marks the site protected (never removed, never batch-migrated).
+is_protected() { awk -F'\t' -v h="$1" '$0 !~ /^#/ && $1 == h && $5 == "yes" { f=1 } END { exit !f }' "$SITES_TSV"; }
+
+# site_php <path> : the PHP formula a linked site runs on (.valetrc written by site_finalize, else the default).
+site_php() { local p; p="$(sed -n 's/^php=//p' "$1/.valetrc" 2> /dev/null | head -1)"; printf '%s' "${p:-$DEFAULT_PHP}"; }
+
 # php_bin php@7.4 -> /opt/homebrew/opt/php@7.4/bin/php
 php_bin() {
 	# Homebrew's current `php` formula carries the newest version and is only *aliased* php@X.Y (no opt/php@X.Y link).

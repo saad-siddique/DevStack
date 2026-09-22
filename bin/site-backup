@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# site-backup <name> [--out DIR] [--db-only|--files-only] [--json]
+# site-backup --list [name] [--json]
+# One backup = a folder that `site-import <newname> <folder>` restores: files/ (an APFS clone of the site folder,
+# instant and space-free on the same volume), db.sql.gz (mysqldump --force, so stale views cannot abort it) and
+# manifest.json. Default root: ~/Backups/local-devstack/<name>/<YYYYMMDD-HHMMSS>/. Read-only on the site, so
+# protected sites are allowed here (it is the safety net site-remove --backup relies on).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/local-devstack}"
+NAME="" ; OUT="$BACKUP_ROOT" ; DB=1 ; FILES=1 ; JSON=0 ; LIST=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--out) OUT="$2"; shift ;; --out=*) OUT="${1#--out=}" ;;
+		--db-only) FILES=0 ;; --files-only) DB=0 ;;
+		--list) LIST=1 ;; --json) JSON=1 ;;
+		--*) die "unknown flag $1" ;;
+		*) NAME="$1" ;;
+	esac
+	shift
+done
+
+if [ "1" = "$LIST" ]; then
+	# Every manifest under <root>/<site>/<stamp>/, newest first; size is measured live (clones grow as the site diverges).
+	out="$(for m in "$OUT"/${NAME:-*}/*/manifest.json; do
+		[ -f "$m" ] || continue
+		d="$(dirname "$m")"; sz="$(du -sk "$d" 2> /dev/null | cut -f1)"
+		jq --arg path "$d" --argjson size "$(( ${sz:-0} * 1024 ))" '. + {path:$path, size_bytes:$size}' "$m"
+	done | jq -s 'sort_by(.created) | reverse')"
+	if [ "1" = "$JSON" ]; then echo "$out"; else
+		echo "$out" | jq -r '.[] | "\(.name)\t\(.created)\t\(.size_bytes / 1048576 | floor)M\t\(if .db_dump then "db" else "-" end)\t\(if .files then "files" else "-" end)\t\(.path)"' | column -t -s $'\t'
+	fi
+	exit 0
+fi
+
+[ -n "$NAME" ] || die "usage: site-backup <name> [--out DIR] [--db-only|--files-only] [--json]  |  site-backup --list [name]"
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+[ -n "$SITE_PATH" ] && [ -d "$SITE_PATH" ] || die "unknown site '$NAME' (not linked in Valet)"
+PHPV="$(site_php "$SITE_PATH")"; URL="https://$NAME.$TLD"
+STAMP="$(date +%Y%m%d-%H%M%S)"; DEST="$OUT/$NAME/$STAMP"
+mkdir -p "$DEST" "$LOG_DIR"; exec 2> >(tee -a "$LOG_DIR/site-backup-$NAME.log" >&2)
+log "=== site-backup $NAME -> $DEST"
+
+db_name=""; n_tables=0; dump=null
+if [ "1" = "$DB" ] && [ -f "$SITE_PATH/wp-config.php" ]; then
+	db_name="$(wp_site "$PHPV" "$SITE_PATH" config get DB_NAME 2> /dev/null | tail -1 || true)"
+	[ -n "$db_name" ] || die "cannot read DB_NAME from $SITE_PATH/wp-config.php"
+	n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$(sql_quote "$db_name")' AND TABLE_TYPE='BASE TABLE'")"
+	[ "$n_tables" -gt 0 ] || die "database $db_name has no tables (wrong wp-config?)"
+	log "db: dumping $db_name ($n_tables tables)"
+	# --force: a stale VIEW must not abort the dump (Automator recreates its views); --no-tablespaces: no PROCESS privilege noise.
+	"$BREW_PREFIX/opt/mysql@8.4/bin/mysqldump" -uroot --single-transaction --quick --routines --triggers --events --force --no-tablespaces --set-gtid-purged=OFF "$db_name" \
+		2> >(grep -v 'Using a password' >&2) | gzip > "$DEST/db.sql.gz"
+	[ -s "$DEST/db.sql.gz" ] || die "empty dump"
+	dump='"db.sql.gz"'
+	log "db: $(du -h "$DEST/db.sql.gz" | cut -f1) compressed"
+elif [ "1" = "$DB" ]; then
+	log "db: no wp-config.php, nothing to dump"
+fi
+
+files=false
+if [ "1" = "$FILES" ]; then
+	# cp -c clones on APFS (same volume: instant, shares blocks until either side changes); elsewhere it copies.
+	cp -Rc "$SITE_PATH" "$DEST/files" 2> >(grep -v 'Operation not permitted' >&2) || cp -R "$SITE_PATH" "$DEST/files"
+	files=true
+	log "files: cloned $(find "$DEST/files" -type f | wc -l | tr -d ' ') files"
+fi
+
+jq -n --arg name "$NAME" --arg url "$URL" --arg php "$PHPV" --arg path "$SITE_PATH" --arg db "$db_name" --argjson tables "$n_tables" \
+	--argjson dump "$dump" --argjson files "$files" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg host "$(hostname -s)" \
+	'{name:$name,url:$url,php:$php,source_path:$path,db:(if $db == "" then null else $db end),tables:$tables,db_dump:$dump,files:$files,created:$created,host:$host}' > "$DEST/manifest.json"
+size="$(du -sk "$DEST" | cut -f1)"
+log "done: $DEST ($(( size / 1024 ))M on disk)"
+if [ "1" = "$JSON" ]; then
+	jq --arg path "$DEST" --argjson size "$(( size * 1024 ))" '. + {path:$path,size_bytes:$size,ok:true}' "$DEST/manifest.json"
+else
+	echo "$DEST"
+fi

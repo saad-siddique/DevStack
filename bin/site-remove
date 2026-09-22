@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
-# site-remove <name> --yes [--keep-files] [--keep-db]
+# site-remove <name> --yes [--backup] [--keep-files] [--keep-db]
 # Unsecure + unlink from Valet, drop the site's database and DB user (read from wp-config), delete the folder.
+# --backup runs site-backup first and aborts if that fails (what the menu-bar app does by default).
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-NAME="" ; YES=0 ; KEEP_FILES=0 ; KEEP_DB=0
+NAME="" ; YES=0 ; BACKUP=0 ; KEEP_FILES=0 ; KEEP_DB=0
 for arg in "$@"; do
 	case "$arg" in
-		--yes) YES=1 ;; --keep-files) KEEP_FILES=1 ;; --keep-db) KEEP_DB=1 ;;
+		--yes) YES=1 ;; --backup) BACKUP=1 ;; --keep-files) KEEP_FILES=1 ;; --keep-db) KEEP_DB=1 ;;
 		--*) die "unknown flag $arg" ;;
 		*) NAME="$arg" ;;
 	esac
 done
-[ -n "$NAME" ] || die "usage: site-remove <name> --yes [--keep-files] [--keep-db]"
+[ -n "$NAME" ] || die "usage: site-remove <name> --yes [--backup] [--keep-files] [--keep-db]"
 [ "1" = "$YES" ] || die "refusing without --yes (this deletes the folder and the database)"
-if awk -F'\t' -v h="$NAME" '$0 !~ /^#/ && $1 == h && $5 == "yes" { f=1 } END { exit !f }' "$SITES_TSV"; then die "$NAME is a PROTECTED site in sites.tsv; not removing"; fi
+is_protected "$NAME" && die "$NAME is a PROTECTED site in sites.tsv; not removing"
 SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || echo "$SITES_DIR/$NAME")"
 log "=== site-remove $NAME ($SITE_PATH)"
+if [ "1" = "$BACKUP" ]; then
+	"$REPO_DIR/bin/site-backup" "$NAME" > /dev/null || die "backup failed; nothing was removed"
+fi
 
 if [ "1" != "$KEEP_DB" ]; then
-	php="$DEFAULT_PHP"; [ -f "$SITE_PATH/.valetrc" ] && php="$(sed -n 's/^php=//p' "$SITE_PATH/.valetrc")"
+	php="$(site_php "$SITE_PATH")"
 	db=""; user=""
 	if [ -f "$SITE_PATH/wp-config.php" ]; then
 		db="$(wp_site "$php" "$SITE_PATH" config get DB_NAME 2> /dev/null || true)"
