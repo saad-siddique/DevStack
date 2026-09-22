@@ -138,6 +138,16 @@ if ( '' !== $api ) {
 		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'stack-upgrade failed' ) );
 	}
 
+	if ( 'favorite' === $api && $is_write ) {
+		$name = (string) ( $_POST['name'] ?? '' );
+		$op   = (string) ( $_POST['op'] ?? 'toggle' );
+		if ( ! preg_match( '/^[a-z0-9][a-z0-9.-]*$/', $name ) || ! in_array( $op, array( 'on', 'off', 'toggle' ), true ) ) {
+			devstack_json( 400, array( 'error' => 'Unknown site or operation.' ) );
+		}
+		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/site-favorite', $name, $op, '--json' ), $home );
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'site-favorite failed' ) );
+	}
+
 	if ( 'sizes-refresh' === $api && $is_write ) {
 		// du over every site takes minutes: start it detached and let the next status reload pick the numbers up.
 		$cmd = sprintf( 'nohup %s --refresh --json > /dev/null 2>&1 &', escapeshellarg( $repo_bin . '/site-sizes' ) );

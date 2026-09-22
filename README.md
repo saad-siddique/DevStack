@@ -100,6 +100,7 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Log in to wp-admin | Key icon on its row. A one-time link signs you in as the first administrator; nothing to type. |
 | Back up a site | ⋯ → Back up now. Files are cloned and the database dumped into `~/Backups/DevStack/<site>/<stamp>/`. |
 | Archive a site | ⋯ → Archive (back up, then remove)…. A verbatim backup is taken and kept, then the site is removed. Tick *Compress the files* when you want the disk space back (see Backups below). Protected sites cannot be archived. |
+| Pin the sites you use daily | ⋯ → Add to favourites. Favourites show a ★ and always sort first, whatever the sort; the dashboard has the same star in the Site column. |
 | See what a site costs | Each row shows folder + database size; the Size sort puts the biggest first; the line under the list has the totals and a *Measure* button (folders are walked nightly, databases are live). |
 | Restore a site | ⋯ → Restore from backup…, or ⋯ menu → Backups…. Restore recreates it exactly: same address, PHP version, database name and logins. If the site still exists you are asked to replace it (a safety backup is taken first). |
 | Duplicate a site | ⋯ → Duplicate…. Backs up, then imports the backup under the new name with its own database and rewritten URLs. |
@@ -158,6 +159,7 @@ devstack backups                                 # list them, newest first
 devstack backups --prune --keep 5                # delete older backups (the newest of every site always stays)
 devstack archive myplugin [--compress]           # verbatim backup, then remove the site; --compress really frees the disk
 devstack sizes [--refresh]                       # disk per site folder (the nightly run refreshes; --refresh walks now)
+devstack favorite myplugin [on|off]              # pin a site to the top of the Sites list, in the app and on the dashboard
 devstack restore myplugin [--replace]            # bring it back exactly as it was (same URL, PHP, database, logins)
 devstack clone myplugin myplugin-copy            # a copy under a new name: own database, URLs rewritten
 devstack remove myplugin --yes --backup          # same as archive, spelled out

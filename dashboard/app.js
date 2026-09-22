@@ -176,7 +176,11 @@
 		tbody.textContent = '';
 		var q = filterText.trim().toLowerCase();
 		var rows = s.sites.filter( function ( site ) { return ! q || -1 !== site.name.indexOf( q ); } );
-		if ( sortBySize ) { rows = rows.slice().sort( function ( a, b ) { return ( ( b.files_bytes || 0 ) + ( b.db_bytes || 0 ) ) - ( ( a.files_bytes || 0 ) + ( a.db_bytes || 0 ) ); } ); }
+		rows = rows.slice().sort( function ( a, b ) {
+			if ( !! a.favorite !== !! b.favorite ) { return a.favorite ? -1 : 1; }          // favourites always first
+			if ( sortBySize ) { return ( ( b.files_bytes || 0 ) + ( b.db_bytes || 0 ) ) - ( ( a.files_bytes || 0 ) + ( a.db_bytes || 0 ) ); }
+			return a.name < b.name ? -1 : ( a.name > b.name ? 1 : 0 );
+		} );
 		$( 'sort-size' ).classList.toggle( 'on', sortBySize );
 		rows.forEach( function ( site ) {
 			var host = site.name + '.test';
@@ -186,7 +190,9 @@
 			if ( site.wp ) {
 				open.appendChild( el( 'a', { href: 'https://' + host + '/wp-admin/', target: '_blank', rel: 'noopener', text: 'wp-admin' } ) );
 			}
-			var nameCell = el( 'td', { 'class': 'name' }, [ el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: host } ) ] );
+			var star = el( 'button', { 'class': 'star' + ( site.favorite ? ' on' : '' ), type: 'button', title: site.favorite ? 'Remove from favourites' : 'Add to favourites', 'aria-pressed': site.favorite ? 'true' : 'false', text: site.favorite ? '★' : '☆' } );
+			star.addEventListener( 'click', function () { star.disabled = true; post( 'favorite', { name: site.name, op: 'toggle' } ).then( refresh ); } );
+			var nameCell = el( 'td', { 'class': 'name' }, [ star, el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: host } ) ] );
 			if ( site.fatals_recent ) {
 				nameCell.appendChild( el( 'span', { 'class': 'badge fatals', title: site.fatals_recent + ' PHP fatal error(s) in debug.log today or yesterday — Logs tab, wp ' + site.name, text: site.fatals_recent + ( 1 === site.fatals_recent ? ' fatal' : ' fatals' ) } ) );
 			}

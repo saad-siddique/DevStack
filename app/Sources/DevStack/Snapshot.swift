@@ -66,7 +66,8 @@ enum Snapshot {
 		let home = NSHomeDirectory()
 		func site(_ n: String, _ php: String, wp: Bool = true, protected: Bool = false, files: Int = 900_000_000, db: Int = 60_000_000) -> Site {
 			Site(name: n, php: php, secured: true, wp: wp, path: "\(home)/Sites/\(n)", protected: protected, fatalsRecent: n == "client-blog" ? 2 : 0,
-			     debugLog: wp ? "\(home)/Sites/\(n)/wp-content/debug.log" : nil, db: wp ? "wp_\(n.replacingOccurrences(of: "-", with: "_"))" : nil,
+			     debugLog: wp ? "\(home)/Sites/\(n)/wp-content/debug.log" : nil, favorite: n == "plugin-dev" || n == "client-blog",
+			     db: wp ? "wp_\(n.replacingOccurrences(of: "-", with: "_"))" : nil,
 			     dbBytes: wp ? db : nil, filesBytes: files)
 		}
 		func svc(_ n: String, _ u: String) -> Service { Service(name: n, status: "started", user: u) }

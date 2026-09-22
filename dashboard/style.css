@@ -153,3 +153,7 @@ pre.log .empty-log { color: var(--muted); font-family: inherit; }
 .th-sort { all: unset; cursor: pointer; font: inherit; color: inherit; border-bottom: 1px dotted var(--muted); }
 .th-sort.on { color: var(--accent); border-bottom-color: var(--accent); }
 .sizes { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+
+.sites .star { all: unset; cursor: pointer; margin-right: 8px; color: var(--off); font-size: 15px; line-height: 1; vertical-align: -1px; }
+.sites .star:hover, .sites .star.on { color: var(--warn); }
+.sites .star:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }

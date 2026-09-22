@@ -29,6 +29,7 @@ Sites
   devstack remove <name> --yes [--backup]       unlink, unsecure, drop database + user, delete folder
   devstack sites                                every linked site with its PHP version
   devstack sizes [--refresh]                    folder size per site (refresh walks the disk; the nightly run does too)
+  devstack favorite <name> [on|off]             pin a site to the top of the Sites list (app and dashboard)
   devstack php <name> <7.4|8.2|…|default>       switch the PHP version one site runs on
   devstack login <name> [--user U] [--print]    open wp-admin already signed in (one-time link, 60 s)
   devstack open [dashboard|phpmyadmin|mailpit|<site>]
@@ -77,6 +78,7 @@ case "$cmd" in
 	backups)             case "${1:-}" in --prune|--delete) exec "$BIN/site-backup" "$@" ;; *) exec "$BIN/site-backup" --list "$@" ;; esac ;;
 	archive)             exec "$BIN/site-remove" "$1" --yes --backup "${@:2}" ;;   # [--compress] passes through
 	sizes)               exec "$BIN/site-sizes" "$@" ;;
+	favorite|fav|star)   exec "$BIN/site-favorite" "$@" ;;
 	restore)             exec "$BIN/site-restore" "$@" ;;
 	clone)               exec "$BIN/site-clone" "$@" ;;
 	watchdog)            exec "$BIN/watchdog" "$@" ;;

@@ -366,6 +366,7 @@ final class AppState: ObservableObject {
 	}
 
 	func refreshSizes() { runJob(title: "Measure site folders", ["sizes", "--refresh", "--json"]) }
+	func toggleFavorite(_ site: Site) async { await quick("fav:" + site.name, ["favorite", site.name, site.isFavorite ? "off" : "on", "--json"]) }
 
 	private func runJob(title: String, _ args: [String]) {
 		guard !task.running else { errorMessage = "Another task is still running."; return }

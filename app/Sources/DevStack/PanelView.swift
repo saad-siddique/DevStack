@@ -153,7 +153,11 @@ struct SitesView: View {
 
 	private var sites: [Site] {
 		let list = (state.status?.userSites ?? []).filter { filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) }
-		return sortBySize ? list.sorted { $0.totalBytes > $1.totalBytes } : list
+		// Favourites always first; within each group the chosen order.
+		return list.sorted { a, b in
+			if a.isFavorite != b.isFavorite { return a.isFavorite }
+			return sortBySize ? a.totalBytes > b.totalBytes : a.name.localizedStandardCompare(b.name) == .orderedAscending
+		}
 	}
 
 	private var sizesLine: String? {
@@ -225,7 +229,7 @@ struct SiteRow: View {
 	}
 
 	var body: some View {
-		Row(title: site.name, subtitle: subtitle) {
+		Row(title: site.name + (site.isFavorite ? "  ★" : ""), subtitle: subtitle) {
 			if fatals > 0 && fpmStopped == nil {
 				Image(systemName: "exclamationmark.circle.fill").font(.caption).frame(width: 12).foregroundStyle(Color.red)
 					.help("\(fatals) PHP fatal error\(fatals == 1 ? "" : "s") logged today or yesterday; ⋯ → Open debug.log")
@@ -251,6 +255,8 @@ struct SiteRow: View {
 					Button("Start PHP \(v) (site is down)") { Task { await state.startPhp(version: v) } }
 					Divider()
 				}
+				Button(site.isFavorite ? "Remove from favourites" : "Add to favourites") { Task { await state.toggleFavorite(site) } }
+				Divider()
 				Button("Log in to wp-admin") { Task { await state.login(siteNamed: site.name) } }.disabled(!site.wp)
 				Button("Open wp-admin") { state.open(site.adminUrl) }.disabled(!site.wp)
 				Button("Open folder") { state.openFolder(site.path) }

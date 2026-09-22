@@ -31,6 +31,7 @@ today="$(date '+%d-%b-%Y')"; yday="$(date -v-1d '+%d-%b-%Y')"
 db_sizes="$(mysql_new -N -e "SELECT table_schema, COALESCE(SUM(data_length + index_length), 0) FROM information_schema.TABLES GROUP BY table_schema" 2> /dev/null \
 	| jq -R 'split("\t") | select(length == 2) | {(.[0]): (.[1] | tonumber)}' | jq -s 'add // {}' 2> /dev/null || echo '{}')"
 folder_sizes="$(jq -c '.' "$DATA_DIR/sizes.json" 2> /dev/null || echo '{"computed_at":null,"sites":{}}')"
+favorites="$(jq -c '.favorites // []' "$DATA_DIR/settings.json" 2> /dev/null || echo '[]')"
 sites="$(for l in "$VALET_HOME"/Sites/*; do
 	[ -L "$l" ] || continue
 	n="$(basename "$l")"; php=default
@@ -47,9 +48,10 @@ sites="$(for l in "$VALET_HOME"/Sites/*; do
 	if [ -f "$dlog" ]; then fatals="$(tail -n 3000 "$dlog" | /usr/bin/grep -cE "^\[($today|$yday)[^]]*\] PHP (Fatal|Parse) error" || true)"; else dlog=""; fi
 	dbn=""; [ "true" = "$wp" ] && dbn="$(sed -nE "s/.*define\( *['\"]DB_NAME['\"], *['\"]([^'\"]+)['\"].*/\1/p" "$target/wp-config.php" 2> /dev/null | head -1 || true)"
 	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" --argjson prot "$prot" --argjson fatals "${fatals:-0}" --arg dlog "$dlog" \
-		--arg dbn "$dbn" --argjson dbs "$db_sizes" --argjson fs "$folder_sizes" \
+		--arg dbn "$dbn" --argjson dbs "$db_sizes" --argjson fs "$folder_sizes" --argjson favs "$favorites" \
 		'{name:$name,php:$php,secured:$secured,wp:$wp,path:$path,protected:$prot,fatals_recent:$fatals,debug_log:(if $dlog == "" then null else $dlog end),
-		  db:(if $dbn == "" then null else $dbn end), db_bytes:(if $dbn == "" then null else ($dbs[$dbn] // null) end), files_bytes:($fs.sites[$name] // null)}'
+		  db:(if $dbn == "" then null else $dbn end), db_bytes:(if $dbn == "" then null else ($dbs[$dbn] // null) end), files_bytes:($fs.sites[$name] // null),
+		  favorite:($favs | index($name) != null)}'
 done | jq -s 'sort_by(.name)')"
 
 # Port owner: when several processes listen (Docker's *:6379 beside Homebrew's 127.0.0.1:6379), prefer the

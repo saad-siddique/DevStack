@@ -92,6 +92,8 @@ struct Site: Decodable, Identifiable, Equatable, Hashable {
 	let protected: Bool?
 	let fatalsRecent: Int?      // PHP fatals in wp-content/debug.log today or yesterday
 	let debugLog: String?
+	let favorite: Bool?
+	var isFavorite: Bool { favorite ?? false }
 	let db: String?
 	let dbBytes: Int?           // live, from information_schema
 	let filesBytes: Int?        // from the nightly du (devstack sizes --refresh)
