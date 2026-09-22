@@ -72,7 +72,17 @@ fi
 
 wp() { wp_site "$SITE_PHP" "$SITE_PATH" "$@"; }
 
-# 4. Database: copy MAMP -> mysql@8.4 once; recreate the site's DB user.
+# 4. Database. First the site's DB user (view DEFINERs must exist before CREATE VIEW), then a one-time copy MAMP -> mysql@8.4.
+db_user="$(wp config get DB_USER)"
+db_pass="$(wp config get DB_PASSWORD)"
+u="$(sql_quote "$db_user")"; p="$(sql_quote "$db_pass")"; d="$(printf '%s' "$SITE_DB" | sed 's/`/``/g')"
+if [ "1" = "$DRY" ]; then
+	log "DRY: ensure MySQL user $db_user with grants on $SITE_DB"
+else
+	mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
+fi
+log "db user: $db_user ensured"
+
 step_db=already
 if [ "0" = "$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$(sql_quote "$SITE_DB")'")" ]; then
 	dump="$LOG_DIR/$SITE_DB.$(date +%Y%m%d-%H%M%S).sql"
@@ -95,15 +105,6 @@ if [ "0" = "$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.SCHEMATA 
 fi
 log "db: $step_db"
 
-db_user="$(wp config get DB_USER)"
-db_pass="$(wp config get DB_PASSWORD)"
-u="$(sql_quote "$db_user")"; p="$(sql_quote "$db_pass")"; d="$(printf '%s' "$SITE_DB" | sed 's/`/``/g')"
-if [ "1" = "$DRY" ]; then
-	log "DRY: ensure MySQL user $db_user with grants on $SITE_DB"
-else
-	mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
-fi
-log "db user: $db_user ensured"
 
 # 5. DB_HOST -> 127.0.0.1 (must happen BEFORE search-replace, or WP-CLI would edit MAMP's copy).
 step_dbhost=already
