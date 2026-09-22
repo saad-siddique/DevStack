@@ -113,7 +113,7 @@ ensure_mysql_tuning() {
 		local i; for i in $(seq 1 30); do "$BREW_PREFIX/opt/mysql@8.4/bin/mysqladmin" -uroot ping > /dev/null 2>&1 && break; sleep 1; done
 	fi
 	if [ "OFF" = "$("$BREW_PREFIX/opt/mysql@8.4/bin/mysql" -uroot -N -e "SELECT @@log_bin" 2> /dev/null | sed 's/^0$/OFF/;s/^1$/ON/')" ]; then
-		local n; n="$(ls "$BREW_PREFIX"/var/mysql/binlog.* 2> /dev/null | wc -l | tr -d ' ')"
+		local n; n="$(ls "$BREW_PREFIX"/var/mysql/binlog.* 2> /dev/null | wc -l | tr -d ' ' || true)"   # pipefail: no binlogs = ls fails
 		if [ "$n" -gt 0 ]; then
 			local size; size="$(du -ch "$BREW_PREFIX"/var/mysql/binlog.* 2> /dev/null | tail -1 | cut -f1)"
 			rm -f "$BREW_PREFIX"/var/mysql/binlog.*; ok "removed $n stale binary logs ($size) — binlogging is off"
@@ -331,6 +331,35 @@ PLIST
 	fi
 }
 
+# Five-minute watchdog for nginx/dnsmasq (Homebrew's nginx plist has no KeepAlive).
+ensure_watchdog() {
+	log "Watchdog"
+	local label="com.devstack.watchdog" plist="$HOME/Library/LaunchAgents/com.devstack.watchdog.plist" tmp
+	tmp="$(mktemp)"
+	cat > "$tmp" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+	<key>Label</key><string>$label</string>
+	<key>ProgramArguments</key><array><string>/bin/bash</string><string>$REPO_DIR/bin/watchdog</string></array>
+	<key>StartInterval</key><integer>300</integer>
+	<key>RunAtLoad</key><true/>
+	<key>StandardOutPath</key><string>/dev/null</string>
+	<key>StandardErrorPath</key><string>$BREW_PREFIX/var/log/devstack-watchdog.log</string>
+	<key>EnvironmentVariables</key><dict><key>PATH</key><string>$BREW_PREFIX/bin:$BREW_PREFIX/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>HOME</key><string>$HOME</string></dict>
+</dict></plist>
+PLIST
+	if ! cmp -s "$tmp" "$plist"; then
+		launchctl bootout "gui/$(id -u)/$label" > /dev/null 2>&1 || true
+		mv "$tmp" "$plist"
+		launchctl bootstrap "gui/$(id -u)" "$plist" && ok "LaunchAgent installed: nginx/dnsmasq watchdog every 5 minutes"
+	else
+		rm -f "$tmp"
+		launchctl print "gui/$(id -u)/$label" > /dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$plist"
+		ok "LaunchAgent present: watchdog every 5 minutes"
+	fi
+}
+
 # The global `devstack` command (bin/devstack) and its zsh completion. A symlink, so `git pull` updates it.
 ensure_cli() {
 	log "devstack command"
@@ -364,6 +393,7 @@ ensure_dashboard
 ensure_phpmyadmin
 ensure_log_pruning
 ensure_stack_upgrades
+ensure_watchdog
 ensure_cli
 if [ "1" = "$WITH_APP" ]; then log "Menu-bar app"; "$REPO_DIR/bin/app" install; fi
 log "Done. devstack help lists every command; devstack app install builds the menu-bar app."

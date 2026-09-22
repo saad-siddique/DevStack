@@ -22,7 +22,10 @@ Sites
   devstack new <name> [--php 8.2] [--empty]     fresh WordPress at https://<name>.$TLD (prints the admin password once)
   devstack import <name> <zip|folder> [--php X] LocalWP export, any folder + .sql, or a devstack backup folder
   devstack backup <name> [--db-only]            ~/Backups/DevStack/<name>/<stamp>/ (files clone + db.sql.gz)
-  devstack backups [name]                       list backups
+  devstack backups [name] | --prune [--keep 5]  list backups | delete old ones (newest per site always kept)
+  devstack archive <name>                       verbatim backup, then remove the site (restore brings it back as it was)
+  devstack restore <name> [--from DIR] [--replace]   recreate a site from its backup: same URL, PHP, database, logins
+  devstack clone <source> <new-name> [--php X]  copy of a site under a new name (URLs rewritten, own database)
   devstack remove <name> --yes [--backup]       unlink, unsecure, drop database + user, delete folder
   devstack sites                                every linked site with its PHP version
   devstack php <name> <7.4|8.2|…|default>       switch the PHP version one site runs on
@@ -33,6 +36,7 @@ Sites
 Stack
   devstack status [--json]                      services, PHP versions, sites, ports, MySQL, mail
   devstack doctor [--json]                      check everything and say what is wrong (and how to fix it)
+  devstack watchdog                             restart nginx/dnsmasq if launchd lost them (runs every 5 min by itself)
   devstack service <name> start|stop|restart    nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
   devstack xdebug on|off|status [--php 8.4]     trigger mode, port 9003
   devstack logs [list|<source>|wp <site>|crashes|clear ...]
@@ -69,7 +73,11 @@ case "$cmd" in
 	import)              exec "$BIN/site-import" "$@" ;;
 	remove|rm)           exec "$BIN/site-remove" "$@" ;;
 	backup)              exec "$BIN/site-backup" "$@" ;;
-	backups)             exec "$BIN/site-backup" --list "$@" ;;
+	backups)             case "${1:-}" in --prune|--delete) exec "$BIN/site-backup" "$@" ;; *) exec "$BIN/site-backup" --list "$@" ;; esac ;;
+	archive)             exec "$BIN/site-remove" "$1" --yes --backup "${@:2}" ;;
+	restore)             exec "$BIN/site-restore" "$@" ;;
+	clone)               exec "$BIN/site-clone" "$@" ;;
+	watchdog)            exec "$BIN/watchdog" "$@" ;;
 	login)               exec "$BIN/site-login" "$@" ;;
 	php)                 exec "$BIN/site-php" "$@" ;;
 	doctor)              exec "$BIN/doctor" "$@" ;;

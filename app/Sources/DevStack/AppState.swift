@@ -6,13 +6,15 @@ import ServiceManagement
 import SwiftUI
 import UserNotifications
 
-struct TaskLog {
+struct TaskLog: Identifiable {
+	let id = UUID()
 	var title = ""
 	var command = ""
 	var lines: [Devstack.Line] = []
 	var running = false
 	var exitStatus: Int32?
 	var result: JobResult?
+	let startedAt = Date()
 
 	var succeeded: Bool { exitStatus == 0 }
 
@@ -38,6 +40,9 @@ final class AppState: ObservableObject {
 		case newSite
 		case importSite
 		case remove(Site)
+		case clone(Site)
+		case backups(String?)      // optional site filter
+		case panel                 // the menu-bar panel in a window (hotkey fallback)
 		case task
 	}
 
@@ -53,6 +58,12 @@ final class AppState: ObservableObject {
 	@Published private(set) var checkingUpdates = false
 	@Published private(set) var reports: Reports?
 	@Published var dismissedReportIDs: Set<String> = []
+	@Published private(set) var backups: [BackupEntry] = []
+	@Published private(set) var loadingBackups = false
+	@Published private(set) var history: [TaskLog] = []
+	@Published var notificationsEnabled: Bool = UserDefaults.standard.object(forKey: "notifications") as? Bool ?? true {
+		didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notifications") }
+	}
 
 	let sampler = UsageSampler()
 	let installed = Devstack.isInstalled
@@ -67,6 +78,8 @@ final class AppState: ObservableObject {
 	private var lastHealth: Health = .unknown
 	private var lastUpgradeRunAt: String??            // nil until first read
 	private var notifiedUpdateHead: String?
+	private var lastWatchdogActionID: String??        // nil until first read
+	private var hotKey: HotKey?
 
 	init() {
 		if !installed { errorMessage = Devstack.Failure.notInstalled.localizedDescription }
@@ -74,6 +87,28 @@ final class AppState: ObservableObject {
 		Task { await refresh() }
 		schedule()
 		scheduleUpdateChecks()
+		hotKey = HotKey { [weak self] in self?.togglePanel() }
+	}
+
+	private func notify(_ title: String, _ body: String) {
+		guard notificationsEnabled else { return }
+		notifier.post(title: title, body: body)
+	}
+
+	/// ⌃⌥D: click the status item if we can find it, else show the panel in an ordinary window.
+	func togglePanel() {
+		if let button = NSApp.windows.compactMap({ $0.contentView }).lazy.compactMap({ Self.statusBarButton(in: $0) }).first {
+			button.performClick(nil)
+		} else {
+			modal = .panel
+			showModalWindow?()
+		}
+	}
+
+	private static func statusBarButton(in view: NSView) -> NSStatusBarButton? {
+		if let b = view as? NSStatusBarButton { return b }
+		for sub in view.subviews { if let b = statusBarButton(in: sub) { return b } }
+		return nil
 	}
 
 	var runaways: [UsageSampler.Runaway] { sampler.runaways }
@@ -145,8 +180,8 @@ final class AppState: ObservableObject {
 			let h = st.health
 			if lastHealth == .ok, h == .down || h == .degraded {
 				let down = st.coreServices.filter { !$0.isRunning }.map(\.name)
-				notifier.post(title: h == .down ? "DevStack: a core service is down" : "DevStack: stack degraded",
-				              body: down.isEmpty ? "launchd reports an error. Open DevStack for details." : "\(down.joined(separator: ", ")) not running.")
+				notify(h == .down ? "DevStack: a core service is down" : "DevStack: stack degraded",
+				       down.isEmpty ? "launchd reports an error. Open DevStack for details." : "\(down.joined(separator: ", ")) not running.")
 			}
 			lastHealth = h
 			let runAt = st.upgrades?.lastRun?.at
@@ -154,18 +189,24 @@ final class AppState: ObservableObject {
 				let up = (run.upgraded ?? []).map { "\($0.name) \($0.from) → \($0.to)" }
 				let failed = (run.failed ?? []).map(\.name)
 				if !up.isEmpty || !failed.isEmpty {
-					notifier.post(title: failed.isEmpty ? "DevStack upgraded the stack" : "DevStack: stack upgrade had failures",
-					              body: (up.isEmpty ? "" : up.joined(separator: ", ")) + (failed.isEmpty ? "" : " Failed: \(failed.joined(separator: ", "))"))
+					notify(failed.isEmpty ? "DevStack upgraded the stack" : "DevStack: stack upgrade had failures",
+					       (up.isEmpty ? "" : up.joined(separator: ", ")) + (failed.isEmpty ? "" : " Failed: \(failed.joined(separator: ", "))"))
 				}
 			}
 			lastUpgradeRunAt = .some(runAt)
+			// Watchdog: a new action since last time means nginx or dnsmasq was brought back.
+			let lastAction = st.watchdog?.actions?.last
+			if let previous = lastWatchdogActionID, previous != lastAction?.id, let a = lastAction {
+				notify("DevStack watchdog: \(a.service) \(a.result ?? "restarted")", "It was \(a.statusBefore ?? "down") with no process running.")
+			}
+			lastWatchdogActionID = .some(lastAction?.id)
 		}
 		if let r = reports {
 			let ids = Set((r.reports ?? []).map(\.id))
 			if let seen = seenReportIDs {
 				for rep in (r.reports ?? []) where !seen.contains(rep.id) {
-					notifier.post(title: rep.isCrash ? "DevStack: \(rep.process) crashed" : "DevStack: \(rep.process) flagged for \(rep.kind ?? "resource use")",
-					              body: rep.reason ?? (rep.isCrash ? "launchd restarts it; see devstack logs crashes." : "macOS wrote a resource report; a runaway request or job?"))
+					notify(rep.isCrash ? "DevStack: \(rep.process) crashed" : "DevStack: \(rep.process) flagged for \(rep.kind ?? "resource use")",
+					       rep.reason ?? (rep.isCrash ? "launchd restarts it; see devstack logs crashes." : "macOS wrote a resource report; a runaway request or job?"))
 				}
 			}
 			seenReportIDs = ids
@@ -209,11 +250,36 @@ final class AppState: ObservableObject {
 		update = try? await Devstack.runJSON(UpdateInfo.self, ["update", "--check", "--json"])
 		if let u = update, u.isAvailable, let head = u.commits?.first, head != notifiedUpdateHead {
 			notifiedUpdateHead = head
-			notifier.post(title: "DevStack update available", body: "\(u.behind ?? 0) commit\((u.behind ?? 0) == 1 ? "" : "s") waiting. Open DevStack to update.")
+			notify("DevStack update available", "\(u.behind ?? 0) commit\((u.behind ?? 0) == 1 ? "" : "s") waiting. Open DevStack to update.")
 		}
 	}
 
 	func runDoctor() { runJob(title: "Doctor", ["doctor"]) }
+	func clone(_ site: Site, as name: String, php: String?) {
+		var args = ["clone", site.name, name, "--json"]
+		if let php, !php.isEmpty { args += ["--php", php] }
+		runJob(title: "Clone \(site.name) → \(name)", args)
+	}
+	func restore(_ b: BackupEntry, replace: Bool) {
+		var args = ["restore", b.name, "--from", b.path, "--json"]
+		if replace { args.append("--replace") }
+		runJob(title: "Restore \(b.name)", args)
+	}
+	func siteExists(_ name: String) -> Bool { status?.sites.contains { $0.name == name } ?? false }
+	func pruneBackups(keep: Int) { runJob(title: "Prune backups (keep \(keep) per site)", ["backups", "--prune", "--keep", String(keep), "--json"]) }
+	func deleteBackup(_ b: BackupEntry) async {
+		await quick("backup:" + b.path, ["backups", "--delete", b.path, "--json"], label: "Backup of \(b.name) from \(b.created ?? "?") deleted")
+		await loadBackups()
+	}
+	func loadBackups() async {
+		guard installed, !frozen else { return }
+		loadingBackups = true
+		defer { loadingBackups = false }
+		backups = (try? await Devstack.runJSON([BackupEntry].self, ["backups", "--json"])) ?? []
+	}
+	func setBackups(_ list: [BackupEntry]) { backups = list }   // snapshot fixtures
+	var backupsTotalBytes: Int { backups.reduce(0) { $0 + ($1.sizeBytes ?? 0) } }
+	func openDebugLog(_ site: Site) { if let p = site.debugLog { openFolder(p) } }
 	func switchPhp(_ site: Site, to version: String) { runJob(title: "\(site.name) → PHP \(version)", ["php", site.name, version, "--json"]) }
 	func restartService(named name: String) async { await quick(name, ["service", name, "restart"]) }
 	func startPhp(version: String) async { await quick("php@\(version)", ["service", "php@\(version)", "start"]) }
@@ -246,18 +312,24 @@ final class AppState: ObservableObject {
 
 	// MARK: quick actions (a few seconds; the row shows a spinner)
 
-	func toggle(_ s: Service) async { await quick(s.name, ["service", s.name, s.isRunning ? "stop" : "start"]) }
-	func restart(_ s: Service) async { await quick(s.name, ["service", s.name, "restart"]) }
-	func toggleXdebug(_ p: PhpVersion) async { await quick("php@\(p.version)", ["xdebug", p.xdebug ? "off" : "on", "--php", p.version]) }
-	func toggleFpm(_ p: PhpVersion) async { await quick("php@\(p.version)", ["service", "php@\(p.version)", p.fpmRunning ? "stop" : "start"]) }
+	func toggle(_ s: Service) async { await quick(s.name, ["service", s.name, s.isRunning ? "stop" : "start"], label: "\(s.name) \(s.isRunning ? "stopped" : "started")") }
+	func restart(_ s: Service) async { await quick(s.name, ["service", s.name, "restart"], label: "\(s.name) restarted") }
+	func toggleXdebug(_ p: PhpVersion) async { await quick("php@\(p.version)", ["xdebug", p.xdebug ? "off" : "on", "--php", p.version], label: "Xdebug \(p.xdebug ? "off" : "on") for PHP \(p.version)") }
+	func toggleFpm(_ p: PhpVersion) async { await quick("php@\(p.version)", ["service", "php@\(p.version)", p.fpmRunning ? "stop" : "start"], label: "php-fpm \(p.version) \(p.fpmRunning ? "stopped" : "started")") }
 
 	func isBusy(_ key: String) -> Bool { busy.contains(key) }
 
-	private func quick(_ key: String, _ args: [String]) async {
+	/// A short action: spinner on the row, one notification with the outcome, then a status refresh.
+	private func quick(_ key: String, _ args: [String], label: String? = nil) async {
 		busy.insert(key)
 		defer { busy.remove(key) }
 		let r = await Devstack.run(args)
-		if r.status != 0 { errorMessage = r.lastErrorLine }
+		if r.status != 0 {
+			errorMessage = r.lastErrorLine
+			if let label { notify("DevStack: \(label.replacingOccurrences(of: #" (started|stopped|restarted|on|off)$"#, with: "", options: .regularExpression)) failed", r.lastErrorLine) }
+		} else if let label {
+			notify("DevStack", label)
+		}
 		await refresh()
 	}
 
@@ -304,12 +376,16 @@ final class AppState: ObservableObject {
 			}
 			task.finish(status)
 			if args.first == "update", status == 0 { update = nil }
-			if !panelOpen, modal != .task || NSApp.keyWindow == nil {
-				notifier.post(title: task.title, body: status == 0 ? "Finished." : "Failed with status \(status). Open DevStack for the log.")
-			}
+			notify("DevStack: \(task.title)", status == 0 ? (task.result?.url.map { "Done. \($0)" } ?? "Done.") : "Failed with status \(status). Open DevStack for the log.")
+			history.insert(task, at: 0)
+			if history.count > 20 { history.removeLast(history.count - 20) }
+			if ["backup", "restore", "clone", "backups", "remove"].contains(args.first ?? "") { await loadBackups() }
 			await refresh()
 		}
 	}
+
+	/// Show an earlier task's log again (only while nothing is running).
+	func showHistory(_ entry: TaskLog) { guard !task.running else { return }; task = entry }
 
 	// MARK: open things
 

@@ -10,6 +10,7 @@ struct StackStatus: Decodable {
 	var mysql: MySQLInfo
 	var mail: MailInfo
 	var upgrades: Upgrades?
+	var watchdog: Watchdog?
 
 	/// Everything that is not a php-fpm pool; those live under PHP.
 	var coreServices: [Service] { services.filter { !$0.name.hasPrefix("php") } }
@@ -81,6 +82,8 @@ struct Site: Decodable, Identifiable, Equatable, Hashable {
 	let wp: Bool
 	let path: String
 	let protected: Bool?
+	let fatalsRecent: Int?      // PHP fatals in wp-content/debug.log today or yesterday
+	let debugLog: String?
 	var id: String { name }
 	var isProtected: Bool { protected ?? false }
 	var url: String { "\(secured ? "https" : "http")://\(name).test" }
@@ -160,6 +163,36 @@ struct Reports: Decodable {
 	let reports: [Report]?
 	var crashList: [Report] { (reports ?? []).filter(\.isCrash) }
 	var resourceList: [Report] { (reports ?? []).filter { !$0.isCrash } }
+}
+
+/// `bin/watchdog` state: what the five-minute nginx/dnsmasq check last did.
+struct Watchdog: Decodable {
+	struct Action: Decodable, Identifiable {
+		let service: String
+		let statusBefore: String?
+		let result: String?
+		let at: String?
+		var id: String { (at ?? "") + service }
+	}
+	let lastCheck: String?
+	let actions: [Action]?
+}
+
+/// One row of `devstack backups --json`.
+struct BackupEntry: Decodable, Identifiable, Equatable {
+	let name: String
+	let created: String?
+	let path: String
+	let php: String?
+	let db: String?
+	let tables: Int?
+	let dbDump: String?
+	let files: Bool?
+	let sizeBytes: Int?
+	var id: String { path }
+	var createdDate: Date? { created.flatMap { ISO8601DateFormatter().date(from: $0) } }
+	var sizeText: String { ByteCountFormatter.string(fromByteCount: Int64(sizeBytes ?? 0), countStyle: .file) }
+	var restorable: Bool { files ?? false }
 }
 
 /// `devstack update --check --json`

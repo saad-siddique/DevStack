@@ -29,10 +29,11 @@ log_path() {
 		slow)    echo "$VALET_LOG/php-fpm-slow.log" ;;              # requests over 15 s with a stack trace (php-fpm slowlog)
 		prune)   echo "$BREW_LOG/devstack-prune.log" ;;
 		upgrade) echo "$BREW_LOG/devstack-upgrade.log" ;;
+		watchdog) echo "$LOG_DIR/watchdog.log" ;;
 		wp)      local t; t="$(readlink "$VALET_HOME/Sites/$2" 2> /dev/null || true)"; [ -n "$t" ] && echo "$t/wp-content/debug.log" ;;
 	esac
 }
-SOURCES=(nginx php php-fpm slow mysql redis mailpit prune upgrade)
+SOURCES=(nginx php php-fpm slow mysql redis mailpit prune upgrade watchdog)
 
 severity() {
 	# severity <line> : crude but predictable classification for colouring.

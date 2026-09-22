@@ -26,6 +26,7 @@ php_json="$(for d in "$BREW_PREFIX"/etc/php/*/; do
 		'{version:$v,full:$full,formula:$formula,fpm:$fpm,default:$default,sites:$sites,xdebug:$xdebug}'
 done | jq -s 'sort_by(.version)')"
 
+today="$(date '+%d-%b-%Y')"; yday="$(date -v-1d '+%d-%b-%Y')"
 sites="$(for l in "$VALET_HOME"/Sites/*; do
 	[ -L "$l" ] || continue
 	n="$(basename "$l")"; php=default
@@ -37,8 +38,11 @@ sites="$(for l in "$VALET_HOME"/Sites/*; do
 	secured=false; [ -f "$VALET_HOME/Certificates/$n.$TLD.crt" ] && secured=true
 	target="$(readlink "$l")"; wp=false; [ -f "$target/wp-config.php" ] && wp=true
 	prot=false; is_protected "$n" && prot=true
-	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" --argjson prot "$prot" \
-		'{name:$name,php:$php,secured:$secured,wp:$wp,path:$path,protected:$prot}'
+	# PHP fatals WordPress logged today or yesterday (debug.log is rotated, so its tail is enough).
+	fatals=0; dlog="$target/wp-content/debug.log"
+	if [ -f "$dlog" ]; then fatals="$(tail -n 3000 "$dlog" | /usr/bin/grep -cE "^\[($today|$yday)[^]]*\] PHP (Fatal|Parse) error" || true)"; else dlog=""; fi
+	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" --argjson prot "$prot" --argjson fatals "${fatals:-0}" --arg dlog "$dlog" \
+		'{name:$name,php:$php,secured:$secured,wp:$wp,path:$path,protected:$prot,fatals_recent:$fatals,debug_log:(if $dlog == "" then null else $dlog end)}'
 done | jq -s 'sort_by(.name)')"
 
 # Port owner: when several processes listen (Docker's *:6379 beside Homebrew's 127.0.0.1:6379), prefer the
@@ -71,6 +75,8 @@ fi
 
 # Homebrew upgrade state written by bin/stack-upgrade (nightly --auto, or on demand); no network here.
 upgrades="$(jq -c '.' "$DATA_DIR/upgrades.json" 2> /dev/null || echo null)"
+# What the five-minute watchdog last did (bin/watchdog).
+watchdog="$(jq -c '.' "$DATA_DIR/watchdog.json" 2> /dev/null || echo null)"
 
-jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" --argjson upgrades "$upgrades" \
-	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail, upgrades:$upgrades}'
+jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" --argjson upgrades "$upgrades" --argjson watchdog "$watchdog" \
+	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail, upgrades:$upgrades, watchdog:$watchdog}'

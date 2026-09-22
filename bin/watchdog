@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# watchdog [--json] : every five minutes (LaunchAgent com.devstack.watchdog). Homebrew's nginx plist has no
+# KeepAlive, so a crashed nginx (or dnsmasq) stays down until someone notices; this restarts a root-domain service
+# that launchd still has loaded but which is not running. A service the developer stopped is unloaded (status
+# "none") and is left alone. Writes $DATA_DIR/watchdog.json for stack-status, the app and the dashboard.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+JSON=0; [ "${1:-}" = "--json" ] && JSON=1
+STATE="$DATA_DIR/watchdog.json"; mkdir -p "$DATA_DIR" "$LOG_DIR"
+
+services="$(sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]')"
+actions='[]'
+for svc in nginx dnsmasq; do
+	st="$(jq -r --arg n "$svc" '.[] | select(.name == $n) | .status // "none"' <<<"$services" | head -1)"; st="${st:-none}"
+	# nginx renames its master to "nginx: master process …", which -x never matches.
+	running=false
+	case "$svc" in
+		nginx) { pgrep -f 'nginx: master process' > /dev/null 2>&1 || pgrep -x nginx > /dev/null 2>&1; } && running=true ;;
+		*) pgrep -x "$svc" > /dev/null 2>&1 && running=true ;;
+	esac
+	case "$st" in
+		none|scheduled) continue ;;                                   # not asked to run
+		started) [ true = "$running" ] && continue ;;                 # healthy
+	esac
+	# loaded (started/stopped/error/other) but no process: bring it back.
+	if sudo -n "$BREW_PREFIX/bin/brew" services restart "$svc" > /dev/null 2>&1; then result=restarted; else result=failed; fi
+	printf '%s watchdog: %s was %s (process %s) -> %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$svc" "$st" "$([ true = "$running" ] && echo present || echo missing)" "$result" >> "$LOG_DIR/watchdog.log"
+	actions="$(jq -c --arg s "$svc" --arg st "$st" --arg r "$result" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + [{service:$s,status_before:$st,result:$r,at:$at}]' <<<"$actions")"
+done
+
+prev="$(jq -c '.actions // []' "$STATE" 2> /dev/null || echo '[]')"
+jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson new "$actions" --argjson prev "$prev" \
+	'{last_check:$at, actions:(($prev + $new) | .[-20:])}' > "$STATE"
+if [ "1" = "$JSON" ]; then jq '. + {acted:'"$(jq length <<<"$actions")"'}' "$STATE"
+else n="$(jq length <<<"$actions")"; [ "$n" -gt 0 ] && jq -r '.[] | "\(.service): was \(.status_before) -> \(.result)"' <<<"$actions" || echo "nginx and dnsmasq fine"; fi

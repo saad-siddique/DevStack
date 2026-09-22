@@ -72,12 +72,15 @@ struct PanelView: View {
 			.disabled(state.isRefreshing)
 			Menu {
 				Button("Open dashboard") { state.open("https://dashboard.test") }
+				Button("Backups…") { present(.backups(nil)) }
 				Button("Run doctor") { present(.task); state.runDoctor() }
 				Divider()
 				Button("Open repo folder") { state.openRepo() }
 				Button("Open Sites folder") { state.openFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Sites").path) }
 				Divider()
 				Toggle("Start at login", isOn: Binding(get: { state.launchAtLogin }, set: { state.setLaunchAtLogin($0) }))
+				Toggle("Notifications", isOn: $state.notificationsEnabled)
+				Text("⌃⌥D opens this panel").font(.caption)
 				Button(state.checkingUpdates ? "Checking for updates…" : "Check for updates") { Task { await state.checkForUpdates() } }
 					.disabled(state.checkingUpdates)
 				Button(state.isBusy("upgrade-check") ? "Checking Homebrew…" : "Check Homebrew for stack upgrades") { Task { await state.checkUpgrades() } }
@@ -182,17 +185,23 @@ struct SiteRow: View {
 
 	private var fpmStopped: String? { state.fpmProblem(for: site) }
 
+	private var fatals: Int { site.fatalsRecent ?? 0 }
+
 	private var subtitle: String {
 		var parts = ["PHP \(site.php == "default" ? (state.status?.defaultPhp?.version ?? "default") : site.php)"]
 		if let v = fpmStopped { parts[0] += " (php-fpm \(v) stopped)" }
 		parts.append(site.wp ? "WordPress" : "PHP / static")
 		if site.isProtected { parts.append("protected") }
+		if fatals > 0 { parts.append("\(fatals) fatal\(fatals == 1 ? "" : "s") in debug.log") }
 		return parts.joined(separator: "  ·  ")
 	}
 
 	var body: some View {
 		Row(title: site.name, subtitle: subtitle) {
-			if fpmStopped != nil {
+			if fatals > 0 && fpmStopped == nil {
+				Image(systemName: "exclamationmark.circle.fill").font(.caption).frame(width: 12).foregroundStyle(Color.red)
+					.help("\(fatals) PHP fatal error\(fatals == 1 ? "" : "s") logged today or yesterday; ⋯ → Open debug.log")
+			} else if fpmStopped != nil {
 				Image(systemName: "exclamationmark.triangle.fill").font(.caption).frame(width: 12).foregroundStyle(Color.orange)
 					.help("This site's PHP version is not running; it answers 502 until it is started")
 			} else {
@@ -221,6 +230,7 @@ struct SiteRow: View {
 					Button("Open in \(e.name)") { state.open(site.path, with: e.path) }
 				}
 				Button("Copy URL") { state.copy(site.url) }
+				if site.debugLog != nil { Button(fatals > 0 ? "Open debug.log (\(fatals) fatals)" : "Open debug.log") { state.openDebugLog(site) } }
 				Divider()
 				Menu("PHP version") {
 					ForEach(state.status?.php ?? []) { p in
@@ -234,7 +244,10 @@ struct SiteRow: View {
 					}
 				}
 				Button("Back up now") { state.backup(site) }
-				Button("Remove…", role: .destructive) { present(.remove(site)) }.disabled(site.isProtected)
+				Button("Restore from backup…") { present(.backups(site.name)) }
+				Button("Duplicate…") { present(.clone(site)) }
+				Divider()
+				Button("Archive (back up, then remove)…") { present(.remove(site)) }.disabled(site.isProtected)
 			} label: {
 				Image(systemName: "ellipsis.circle")
 			}

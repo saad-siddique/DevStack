@@ -181,8 +181,12 @@
 			if ( site.wp ) {
 				open.appendChild( el( 'a', { href: 'https://' + host + '/wp-admin/', target: '_blank', rel: 'noopener', text: 'wp-admin' } ) );
 			}
+			var nameCell = el( 'td', { 'class': 'name' }, [ el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: host } ) ] );
+			if ( site.fatals_recent ) {
+				nameCell.appendChild( el( 'span', { 'class': 'badge fatals', title: site.fatals_recent + ' PHP fatal error(s) in debug.log today or yesterday — Logs tab, wp ' + site.name, text: site.fatals_recent + ( 1 === site.fatals_recent ? ' fatal' : ' fatals' ) } ) );
+			}
 			tbody.appendChild( el( 'tr', {}, [
-				el( 'td', { 'class': 'name' }, [ el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: host } ) ] ),
+				nameCell,
 				el( 'td', {}, [ el( 'span', { 'class': 'badge' + ( '7.4' === php ? ' php74' : '' ), text: 'PHP ' + php } ) ] ),
 				el( 'td', {}, [ el( 'span', { 'class': 'badge ' + ( site.secured ? 'https' : 'http' ), text: site.secured ? 'https' : 'http only' } ) ] ),
 				open,

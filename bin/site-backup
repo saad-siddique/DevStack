@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # site-backup <name> [--out DIR] [--db-only|--files-only] [--json]
 # site-backup --list [name] [--json]
+# site-backup --prune [--keep N] [--older-than DAYS] [name] [--dry-run] [--json]   (default: keep 5 per site)
+# site-backup --delete <backup dir> [--json]
 # One backup = a folder that `site-import <newname> <folder>` restores: files/ (an APFS clone of the site folder,
 # instant and space-free on the same volume), db.sql.gz (mysqldump --force, so stale views cannot abort it) and
 # manifest.json. Default root: ~/Backups/DevStack/<name>/<YYYYMMDD-HHMMSS>/. Read-only on the site, so
@@ -8,17 +10,62 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/DevStack}"
-NAME="" ; OUT="$BACKUP_ROOT" ; DB=1 ; FILES=1 ; JSON=0 ; LIST=0
+NAME="" ; OUT="$BACKUP_ROOT" ; DB=1 ; FILES=1 ; JSON=0 ; LIST=0 ; PRUNE=0 ; KEEP=5 ; OLDER="" ; DRY_RUN=0 ; DELETE=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--out) OUT="$2"; shift ;; --out=*) OUT="${1#--out=}" ;;
 		--db-only) FILES=0 ;; --files-only) DB=0 ;;
 		--list) LIST=1 ;; --json) JSON=1 ;;
+		--prune) PRUNE=1 ;; --keep) KEEP="$2"; shift ;; --keep=*) KEEP="${1#--keep=}" ;;
+		--older-than) OLDER="$2"; shift ;; --older-than=*) OLDER="${1#--older-than=}" ;;
+		--dry-run) DRY_RUN=1 ;;
+		--delete) DELETE="$2"; shift ;; --delete=*) DELETE="${1#--delete=}" ;;
 		--*) die "unknown flag $1" ;;
 		*) NAME="$1" ;;
 	esac
 	shift
 done
+
+# --delete <dir>: one backup, and only under the backup root (no path games).
+if [ -n "$DELETE" ]; then
+	real="$(cd "$DELETE" 2> /dev/null && pwd -P)" || die "no such backup: $DELETE"
+	root="$(cd "$OUT" 2> /dev/null && pwd -P)" || die "backup root missing: $OUT"
+	case "$real" in "$root"/*/*) ;; *) die "refusing: $DELETE is not a backup under $OUT" ;; esac
+	[ -f "$real/manifest.json" ] || die "refusing: $real has no manifest.json"
+	size="$(du -sk "$real" | cut -f1)"
+	rm -rf "$real"; rmdir "$(dirname "$real")" 2> /dev/null || true
+	if [ "1" = "$JSON" ]; then jq -n --arg p "$real" --argjson s "$(( size * 1024 ))" '{deleted:$p,freed_bytes:$s,ok:true}'; else echo "deleted $real ($(( size / 1024 ))M)"; fi
+	exit 0
+fi
+
+# --prune: per site keep the newest N (and/or drop anything older than DAYS); the newest backup of a site always survives.
+if [ "1" = "$PRUNE" ]; then
+	[[ "$KEEP" =~ ^[0-9]+$ ]] || die "--keep takes a number"
+	cutoff=0; [ -n "$OLDER" ] && { [[ "$OLDER" =~ ^[0-9]+$ ]] || die "--older-than takes days"; cutoff="$(( $(date +%s) - OLDER * 86400 ))"; }
+	deleted='[]'; freed=0
+	for sitedir in "$OUT"/${NAME:-*}/; do
+		[ -d "$sitedir" ] || continue
+		i=0
+		for d in $(ls -d "$sitedir"*/ 2> /dev/null | sort -r); do
+			d="${d%/}"; [ -f "$d/manifest.json" ] || continue
+			i=$((i+1)); [ "$i" -gt 1 ] || continue                      # newest always kept
+			created="$(jq -r '.created // empty' "$d/manifest.json")"
+			age_s="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$created" +%s 2> /dev/null || echo 0)"
+			drop=0; [ "$i" -gt "$KEEP" ] && drop=1; [ "$cutoff" -gt 0 ] && [ "$age_s" -gt 0 ] && [ "$age_s" -lt "$cutoff" ] && drop=1
+			[ "1" = "$drop" ] || continue
+			size="$(du -sk "$d" | cut -f1)"; freed=$(( freed + size * 1024 ))
+			deleted="$(jq -c --arg n "$(basename "$sitedir")" --arg p "$d" --arg c "$created" --argjson s "$(( size * 1024 ))" '. + [{name:$n,path:$p,created:$c,size_bytes:$s}]' <<<"$deleted")"
+			[ "1" = "$DRY_RUN" ] || rm -rf "$d"
+		done
+	done
+	if [ "1" = "$JSON" ]; then jq -n --argjson d "$deleted" --argjson f "$freed" --argjson dry "$([ "1" = "$DRY_RUN" ] && echo true || echo false)" --argjson keep "$KEEP" '{deleted:$d,freed_bytes:$f,dry_run:$dry,keep:$keep,ok:true}'
+	else
+		n="$(jq length <<<"$deleted")"
+		[ "$n" -gt 0 ] && jq -r '.[] | "\(.name)\t\(.created)\t\(.size_bytes / 1048576 | floor)M\t\(.path)"' <<<"$deleted" | column -t -s $'\t'
+		echo "$([ "1" = "$DRY_RUN" ] && echo 'would delete' || echo 'deleted') $n backup(s), $(( freed / 1048576 ))M (keeping the newest $KEEP per site$([ -n "$OLDER" ] && echo ", nothing older than $OLDER days"))"
+	fi
+	exit 0
+fi
 
 if [ "1" = "$LIST" ]; then
 	# Every manifest under <root>/<site>/<stamp>/, newest first; size is measured live (clones grow as the site diverges).

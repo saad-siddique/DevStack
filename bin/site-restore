@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# site-restore <name> [--from BACKUP_DIR] [--replace] [--json]
+# Verbatim restore of a site from a devstack backup: same name, URL, PHP version, database name and credentials
+# (wp-config is restored as it was, so no URL rewrite and no new DB user). Default source: the newest backup of
+# <name>. If the site still exists, --replace takes a fresh safety backup, removes it, then restores. Protected
+# sites can only be restored while absent (tooling never removes them).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/DevStack}"
+NAME="" ; FROM="" ; REPLACE=0 ; JSON=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--from) FROM="$2"; shift ;; --from=*) FROM="${1#--from=}" ;;
+		--replace) REPLACE=1 ;; --json) JSON=1 ;;
+		--*) die "unknown flag $1" ;;
+		*) NAME="$1" ;;
+	esac
+	shift
+done
+[ -n "$NAME" ] || die "usage: site-restore <name> [--from BACKUP_DIR] [--replace] [--json]"
+if [ -z "$FROM" ]; then FROM="$(ls -d "$BACKUP_ROOT/$NAME"/*/ 2> /dev/null | sort | tail -1)"; FROM="${FROM%/}"; fi
+[ -n "$FROM" ] && [ -f "$FROM/manifest.json" ] || die "no backup found for $NAME (devstack backups)"
+[ -d "$FROM/files" ] || die "$FROM has no files/ (made with --db-only); use devstack import for a database-only restore"
+PHPV="$(jq -r '.php // empty' "$FROM/manifest.json")"; PHPV="${PHPV:-$DEFAULT_PHP}"
+DUMP="$(jq -r '.db_dump // empty' "$FROM/manifest.json")"
+SITE_PATH="$SITES_DIR/$NAME"; URL="https://$NAME.$TLD"
+mkdir -p "$LOG_DIR"; exec 2> >(tee -a "$LOG_DIR/site-restore-$NAME.log" >&2)
+log "=== site-restore $NAME from $FROM ($PHPV)"
+
+replaced=false
+if [ -e "$SITE_PATH" ] || [ -L "$VALET_HOME/Sites/$NAME" ]; then
+	[ "1" = "$REPLACE" ] || die "$NAME exists; pass --replace to back it up, remove it and restore over it"
+	is_protected "$NAME" && die "$NAME is a PROTECTED site; restore it only after removing it by hand"
+	log "replace: safety backup of the current site first"
+	"$REPO_DIR/bin/site-backup" "$NAME" > /dev/null || die "safety backup failed; nothing was changed"
+	"$REPO_DIR/bin/site-remove" "$NAME" --yes || die "could not remove the current site"
+	replaced=true
+fi
+
+# Files: clone the backup back (instant on the same APFS volume).
+cp -Rc "$FROM/files" "$SITE_PATH" 2> /dev/null || cp -R "$FROM/files" "$SITE_PATH"
+log "files: restored $(find "$SITE_PATH" -type f | wc -l | tr -d ' ') files to $SITE_PATH"
+
+db_name=""; n_tables=0
+if [ -f "$SITE_PATH/wp-config.php" ] && [ -n "$DUMP" ] && [ -f "$FROM/$DUMP" ]; then
+	wp() { wp_site "$PHPV" "$SITE_PATH" "$@"; }
+	db_name="$(wp config get DB_NAME 2> /dev/null | tail -1 || true)"
+	db_user="$(wp config get DB_USER 2> /dev/null | tail -1 || true)"
+	db_pass="$(wp config get DB_PASSWORD 2> /dev/null | tail -1 || true)"
+	[ -n "$db_name" ] || die "cannot read DB_NAME from the restored wp-config.php"
+	dbq="$(printf '%s' "$db_name" | sed 's/`/``/g')"
+	mysql_new -e "CREATE DATABASE IF NOT EXISTS \`$dbq\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
+	if [ -n "$db_user" ] && [ "root" != "$db_user" ]; then db_ensure_user "$db_name" "$db_user" "$db_pass"; fi
+	log "db: importing into $db_name as it was"
+	case "$FROM/$DUMP" in *.gz) gzip -dc "$FROM/$DUMP" ;; *) cat "$FROM/$DUMP" ;; esac | sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$db_name"
+	n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$(sql_quote "$db_name")' AND TABLE_TYPE='BASE TABLE'")"
+	[ "$n_tables" -gt 0 ] || die "import produced no tables"
+	log "db: $n_tables tables"
+	wp cache flush --quiet 2> /dev/null || true
+fi
+
+site_finalize "$NAME" "$SITE_PATH" "$PHPV" || true
+if [ "1" = "$JSON" ]; then
+	jq -n --arg name "$NAME" --arg url "$URL" --arg from "$FROM" --arg php "$PHPV" --arg path "$SITE_PATH" --arg db "$db_name" --argjson tables "$n_tables" --argjson replaced "$replaced" --argjson smoke "$SMOKE_JSON" \
+		'{name:$name,url:$url,from:$from,php:$php,path:$path,db:(if $db == "" then null else $db end),tables:$tables,replaced:$replaced,smoke:$smoke,ok:$smoke.ok}'
+else
+	echo "$URL  restored from $FROM ($n_tables tables, $PHPV)"
+fi
+[ "true" = "$(jq -r .ok <<<"$SMOKE_JSON")" ]

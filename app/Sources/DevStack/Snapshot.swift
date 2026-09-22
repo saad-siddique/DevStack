@@ -33,6 +33,13 @@ enum Snapshot {
 		state.freeze(with: withUpgrades)
 		await capture(PanelView().environmentObject(state), "panel-upgrades", dir)
 		state.freeze(with: fixture)
+		state.setBackups([
+			BackupEntry(name: "acme-shop", created: "2026-09-22T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260922-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, sizeBytes: 277_618_688),
+			BackupEntry(name: "acme-shop", created: "2026-09-21T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260921-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, sizeBytes: 271_000_000),
+			BackupEntry(name: "old-landing", created: "2026-09-18T17:40:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/old-landing/20260918-174000", php: "php@7.4", db: "wp_old_landing", tables: 12, dbDump: "db.sql.gz", files: true, sizeBytes: 96_000_000),
+		])
+		state.modal = .backups(nil)
+		await capture(ModalView().environmentObject(state), "backups", dir)
 		state.modal = .newSite
 		await capture(ModalView().environmentObject(state), "new-site", dir)
 		state.modal = .importSite
@@ -58,7 +65,7 @@ enum Snapshot {
 	private static var fixture: StackStatus {
 		let home = NSHomeDirectory()
 		func site(_ n: String, _ php: String, wp: Bool = true, protected: Bool = false) -> Site {
-			Site(name: n, php: php, secured: true, wp: wp, path: "\(home)/Sites/\(n)", protected: protected)
+			Site(name: n, php: php, secured: true, wp: wp, path: "\(home)/Sites/\(n)", protected: protected, fatalsRecent: n == "client-blog" ? 2 : 0, debugLog: wp ? "\(home)/Sites/\(n)/wp-content/debug.log" : nil)
 		}
 		func svc(_ n: String, _ u: String) -> Service { Service(name: n, status: "started", user: u) }
 		func php(_ v: String, _ full: String, fpm: Bool, def: Bool = false, sites: Int = 0) -> PhpVersion {
@@ -76,7 +83,7 @@ enum Snapshot {
 			ports: ["80": "nginx", "443": "nginx", "3306": "mysql", "1025": "mailpit", "8025": "mailpit", "6379": "redis", "11211": "memcached"],
 			mysql: MySQLInfo(version: "8.4.6", qps: 0.4),
 			mail: MailInfo(backend: "mailpit", total: 3),
-			upgrades: nil)
+			upgrades: nil, watchdog: nil)
 	}
 
 	private static func capture<V: View>(_ view: V, _ name: String, _ dir: String) async {

@@ -12,6 +12,9 @@ struct ModalView: View {
 			case .newSite: NewSiteView()
 			case .importSite: ImportSiteView()
 			case .remove(let site): RemoveSiteView(site: site)
+			case .clone(let site): CloneSiteView(site: site)
+			case .backups(let filter): BackupsView(initialFilter: filter ?? "")
+			case .panel: PanelView()
 			case .task: TaskView()
 			case nil: Text("Nothing to show.").foregroundStyle(.secondary).padding(40)
 			}
@@ -52,6 +55,7 @@ final class FormModel: ObservableObject {
 	@Published var adminUser = "admin"
 	@Published var adminPassword = "admin1"
 	@Published var adminEmail = "admin@example.test"
+	@Published var keep = 5
 }
 
 struct NewSiteView: View {
@@ -197,6 +201,130 @@ private func choose(files: Bool, folders: Bool, types: [UTType], _ done: (String
 	if panel.runModal() == .OK, let url = panel.url { done(url.path) }
 }
 
+// MARK: - Clone
+
+struct CloneSiteView: View {
+	@EnvironmentObject private var state: AppState
+	@Environment(\.dismiss) private var dismiss
+	let site: Site
+	@StateObject private var form = FormModel()
+
+	private var taken: Bool { state.siteExists(form.name) }
+	private var canClone: Bool { isValidName(form.name) && !taken && form.name != site.name }
+
+	var body: some View {
+		Form {
+			LabeledContent("Source") { Text(site.url).foregroundStyle(.secondary) }
+			TextField("New name", text: $form.name, prompt: Text("\(site.name)-copy"))
+			LabeledContent("Address") { Text(form.name.isEmpty ? "https://<name>.test" : "https://\(form.name).test").foregroundStyle(.secondary) }
+			PhpPicker(selection: $form.php, allowAuto: true)
+			if taken { Text("A site called “\(form.name)” already exists.").foregroundStyle(.red).font(.callout) }
+			else {
+				Text("Backs \(site.name) up (the backup is kept), then imports that backup as the new site: own database and user, every URL rewritten to the new address, same logins.")
+					.foregroundStyle(.secondary).font(.callout)
+			}
+		}
+		.formStyle(.grouped)
+		.safeAreaInset(edge: .bottom) {
+			FormFooter(cancel: { dismiss() }, action: "Clone site", enabled: canClone) { state.clone(site, as: form.name, php: form.php) }
+		}
+		.frame(width: 480, height: 330)
+		.navigationTitle("Duplicate \(site.name)")
+	}
+}
+
+// MARK: - Backups
+
+struct BackupsView: View {
+	@EnvironmentObject private var state: AppState
+	@Environment(\.dismiss) private var dismiss
+	let initialFilter: String
+	@StateObject private var form = FormModel()
+	@StateObject private var pending = PendingAction()
+
+	final class PendingAction: ObservableObject {
+		@Published var restoreReplacing: BackupEntry?
+		@Published var deleting: BackupEntry?
+	}
+
+	private var rows: [BackupEntry] {
+		let f = form.filter.trimmingCharacters(in: .whitespaces)
+		return state.backups.filter { f.isEmpty || $0.name.localizedCaseInsensitiveContains(f) }
+	}
+
+	var body: some View {
+		VStack(spacing: 0) {
+			HStack {
+				TextField("Filter by site", text: $form.filter).textFieldStyle(.roundedBorder).frame(width: 220)
+				Spacer()
+				Text("\(state.backups.count) backup\(state.backups.count == 1 ? "" : "s"), \(ByteCountFormatter.string(fromByteCount: Int64(state.backupsTotalBytes), countStyle: .file))")
+					.font(.callout).foregroundStyle(.secondary)
+				Button("Keep newest 5 per site") { state.pruneBackups(keep: 5) }.help("Delete older backups; the newest of every site always stays")
+				Button { Task { await state.loadBackups() } } label: { Image(systemName: "arrow.clockwise") }.disabled(state.loadingBackups)
+			}
+			.padding(14)
+			Divider()
+			if state.loadingBackups && state.backups.isEmpty {
+				Spacer(); ProgressView().controlSize(.small); Spacer()
+			} else if rows.isEmpty {
+				Spacer()
+				Text(form.filter.isEmpty ? "No backups yet. Use “Back up now” on a site." : "No backups for “\(form.filter)”.").foregroundStyle(.secondary)
+				Spacer()
+			} else {
+				ScrollView {
+					LazyVStack(spacing: 0) {
+						ForEach(rows) { b in backupRow(b) }
+					}
+				}
+			}
+			Divider()
+			HStack {
+				Text("A restore recreates the site exactly as it was: same address, PHP version, database and logins.").font(.caption).foregroundStyle(.secondary)
+				Spacer()
+				Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+			}
+			.padding(12)
+		}
+		.frame(width: 640, height: 440)
+		.navigationTitle("Backups")
+		.onAppear { form.filter = initialFilter; Task { await state.loadBackups() } }
+		.alert("Replace the current “\(pending.restoreReplacing?.name ?? "")”?", isPresented: Binding(get: { pending.restoreReplacing != nil }, set: { if !$0 { pending.restoreReplacing = nil } })) {
+			Button("Back up current, then restore", role: .destructive) { if let b = pending.restoreReplacing { state.restore(b, replace: true) }; pending.restoreReplacing = nil }
+			Button("Cancel", role: .cancel) { pending.restoreReplacing = nil }
+		} message: {
+			Text("The site exists. A safety backup of its current state is taken first, then it is removed and this backup is restored over it.")
+		}
+		.alert("Delete this backup?", isPresented: Binding(get: { pending.deleting != nil }, set: { if !$0 { pending.deleting = nil } })) {
+			Button("Delete", role: .destructive) { if let b = pending.deleting { Task { await state.deleteBackup(b) } }; pending.deleting = nil }
+			Button("Cancel", role: .cancel) { pending.deleting = nil }
+		} message: {
+			Text("\(pending.deleting?.name ?? "") from \(pending.deleting?.createdDate?.formatted(date: .abbreviated, time: .shortened) ?? "?") (\(pending.deleting?.sizeText ?? "")). This cannot be undone.")
+		}
+	}
+
+	private func backupRow(_ b: BackupEntry) -> some View {
+		let exists = state.siteExists(b.name)
+		return HStack(spacing: 10) {
+			Image(systemName: b.restorable ? "externaldrive.fill" : "cylinder.split.1x2").foregroundStyle(.secondary).frame(width: 16)
+			VStack(alignment: .leading, spacing: 1) {
+				HStack(spacing: 6) {
+					Text(b.name).fontWeight(.medium)
+					if !exists { Text("site absent").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1).background(Color.orange.opacity(0.15), in: Capsule()) }
+				}
+				Text([b.createdDate?.formatted(date: .abbreviated, time: .shortened) ?? "?", b.sizeText, b.php.map { "PHP \($0.replacingOccurrences(of: "php@", with: ""))" }, b.tables.map { "\($0) tables" }, b.restorable ? "files + database" : "database only"]
+					.compactMap { $0 }.joined(separator: "  ·  ")).font(.caption).foregroundStyle(.secondary)
+			}
+			Spacer()
+			Button(exists ? "Restore…" : "Restore") {
+				if exists { pending.restoreReplacing = b } else { state.restore(b, replace: false) }
+			}.controlSize(.small).disabled(!b.restorable || state.task.running).help(b.restorable ? "" : "Database-only backup: use devstack import")
+			Button { state.openFolder(b.path) } label: { Image(systemName: "folder") }.buttonStyle(.borderless).help("Show in Finder")
+			Button { pending.deleting = b } label: { Image(systemName: "trash") }.buttonStyle(.borderless).help("Delete this backup")
+		}
+		.padding(.horizontal, 14).padding(.vertical, 7)
+	}
+}
+
 // MARK: - Remove
 
 struct RemoveSiteView: View {
@@ -275,6 +403,16 @@ struct TaskView: View {
 					Text(s == 0 ? "Finished" : "Failed with status \(s)").font(.callout).foregroundStyle(s == 0 ? Color.secondary : Color.red)
 				}
 				Spacer()
+				if !state.history.isEmpty {
+					Menu("Previous tasks") {
+						ForEach(state.history) { h in
+							Button { state.showHistory(h) } label: {
+								Label("\(h.title) — \(h.startedAt.formatted(date: .omitted, time: .shortened))", systemImage: h.succeeded ? "checkmark.circle" : "xmark.circle")
+							}
+						}
+					}
+					.fixedSize().disabled(t.running)
+				}
 				Button("Copy log") { state.copy(t.lines.map(\.text).joined(separator: "\n")) }
 				Button(t.running ? "Hide" : "Close") { dismiss() }.keyboardShortcut(.cancelAction)
 			}

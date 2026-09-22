@@ -83,3 +83,18 @@ brew/valet/mysql itself.
   binlogs removed; `bin/doctor`; `bin/site-php`; app: notifications, runaway watch (sampler always on: 3 s / 60 s),
   reports line, site php-fpm-stopped warning, PHP version submenu, Open in editor/terminal, Run doctor.
 - bash 3.2 bit twice: `mapfile` and `case` patterns inside `$( )` (write `(*.ips)`).
+
+## Backups round two, watchdog, hotkey, history (same afternoon)
+
+- `site-restore` (verbatim: files cloned back, wp-config as it was → same DB name/user/password, `.valetrc` PHP,
+  `--replace` = safety backup + remove first; protected sites only while absent), `site-clone` (backup + import as
+  new name), `site-backup --prune --keep N [--older-than D]` and `--delete DIR` (only under the backup root),
+  verbs `archive` (= remove --yes --backup), `restore`, `clone`, `backups --prune`.
+- `bin/watchdog` + LaunchAgent com.devstack.watchdog (300 s): restarts nginx/dnsmasq when loaded but not running.
+  First version restarted a healthy nginx because `pgrep -x nginx` never matches "nginx: master process".
+- stack-status sites[] gain `fatals_recent` (PHP fatals in debug.log today/yesterday) + `debug_log`; `watchdog` state.
+- App: Backups window (restore/replace with safety backup, Finder, delete, prune), Duplicate, Archive wording,
+  fatals badge + Open debug.log, notifications for quick actions and every task with a Notifications toggle,
+  ⌃⌥D hotkey (Carbon; clicks the status item, falls back to the panel in a window), Previous tasks menu.
+- Verified: archive cleantest → 404; restore → 200, wp_cleantest_db / wp_root_user unchanged, 43 tables;
+  clone → clonetest 200 → removed; prune dry run.

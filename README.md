@@ -73,8 +73,11 @@ The icon gains an exclamation badge when a core service is down or launchd repor
   the stack current* below); a **runaway** line when a stack process has sat above 120% CPU for 90 seconds or holds
   more than 3 GB, with a Restart button; and a **reports** line when macOS wrote a crash or resource report for a
   stack process in the last 24 hours (Open shows it in Console).
-- macOS notifications (allow them once when asked): a core service going down, a new crash or resource report, a
-  finished task while the panel is closed, an overnight upgrade, an update becoming available.
+- macOS notifications (allow them once when asked; mute with *Notifications* in the ⋯ menu): every service start,
+  stop or restart, Xdebug and PHP switches, every finished or failed task (backup, import, restore, clone, remove,
+  update, upgrade), a core service going down, a watchdog restart, a new crash or resource report, an overnight
+  upgrade, an update becoming available.
+- **⌃⌥D** opens the panel from anywhere. *Previous tasks* in the task window shows the last 20 logs.
 - Quick-open: **Dashboard** (`https://dashboard.test`), **phpMyAdmin** (every database, signed in as root) and
   **Mailpit** with the count of caught mails.
 - **Stack load**: CPU and memory of the stack's own processes (php-fpm, nginx, mysqld, redis, memcached, mailpit,
@@ -96,7 +99,11 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Open a site | Compass icon on its row, or its URL `https://<name>.test`. |
 | Log in to wp-admin | Key icon on its row. A one-time link signs you in as the first administrator; nothing to type. |
 | Back up a site | ⋯ → Back up now. Files are cloned and the database dumped into `~/Backups/DevStack/<site>/<stamp>/`. |
-| Remove a site | ⋯ → Remove…. *Back up first* is ticked by default. Protected sites cannot be removed. |
+| Archive a site | ⋯ → Archive (back up, then remove)…. A verbatim backup is taken and kept, then the site is removed. Protected sites cannot be archived. |
+| Restore a site | ⋯ → Restore from backup…, or ⋯ menu → Backups…. Restore recreates it exactly: same address, PHP version, database name and logins. If the site still exists you are asked to replace it (a safety backup is taken first). |
+| Duplicate a site | ⋯ → Duplicate…. Backs up, then imports the backup under the new name with its own database and rewritten URLs. |
+| Manage backups | ⋯ menu → Backups…: every backup with date, size and PHP version; Restore, Show in Finder, Delete; *Keep newest 5 per site* prunes the rest. |
+| Spot a broken site | A red badge and "N fatals in debug.log" on the row when WordPress logged PHP fatals today or yesterday; ⋯ → Open debug.log. |
 | Start/stop a service | Services tab → switch. Restart with the arrow. |
 | Switch Xdebug on or off | PHP tab → Xdebug checkbox on that version. |
 | Stop an idle PHP version | PHP tab → switch (the default version stays on). |
@@ -147,7 +154,11 @@ devstack login myplugin                          # opens wp-admin already signed
 devstack import client ~/Downloads/client.zip    # LocalWP export, any zip/folder with a WordPress root + .sql, or a backup folder
 devstack backup myplugin                         # ~/Backups/DevStack/myplugin/<stamp>/ — see Backups
 devstack backups                                 # list them, newest first
-devstack remove myplugin --yes --backup          # back up, then unlink, unsecure, drop database + user, delete the folder
+devstack backups --prune --keep 5                # delete older backups (the newest of every site always stays)
+devstack archive myplugin                        # verbatim backup, then remove the site
+devstack restore myplugin [--replace]            # bring it back exactly as it was (same URL, PHP, database, logins)
+devstack clone myplugin myplugin-copy            # a copy under a new name: own database, URLs rewritten
+devstack remove myplugin --yes --backup          # same as archive, spelled out
 devstack sites                                   # linked sites with PHP version and protection flag
 devstack php myplugin 7.4                        # switch one site's PHP version (7.4 … 8.6, or default); starts that php-fpm
 devstack doctor                                  # check everything (DNS, nginx, php-fpm, MySQL, ports, certs, agents) with fixes
@@ -222,13 +233,23 @@ checks that the host ends in `.test`, deletes the transient, compares hashes wit
 and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account; the default is
 the first administrator (the first super admin on multisite).
 
-## Backups
+## Backups, archive, restore, clone
 
 ⋯ → Back up now on a site row, or `devstack backup <site>`, writes `~/Backups/DevStack/<site>/<YYYYMMDD-HHMMSS>/` holding `files/` (an APFS clone of the
 site folder: instant, and space-free until either side changes), `db.sql.gz` (`mysqldump --force`, so a stale view
 cannot abort it) and `manifest.json` (name, PHP version, database, table count). A 260 MB site backs up in under
-three seconds. Restore or clone it with `devstack import <newname> <backup folder>`; every old URL is rewritten to the
-new name. `devstack remove --backup` refuses to delete anything when the backup fails. Nothing prunes backups for you.
+three seconds.
+
+- **Archive** (`devstack archive <site>`, or ⋯ → Archive in the app) takes that backup, then removes the site. It
+  refuses to remove anything when the backup fails.
+- **Restore** (`devstack restore <site>`, newest backup by default, `--from DIR` for another) puts the site back
+  verbatim: files cloned back, wp-config untouched, so the same database name, user and password, `.valetrc` PHP
+  version, same URL, no rewrite. `--replace` first takes a safety backup of the current site and removes it.
+  Protected sites are restored only while absent.
+- **Clone** (`devstack clone <site> <new>`) backs the source up and imports the backup under the new name: own
+  `wp_<new>` database and user, every URL rewritten, same logins.
+- **Prune** (`devstack backups --prune --keep 5 [--older-than 30]`) deletes older backups per site; the newest one
+  always survives. `devstack backups --delete <dir>` removes one. Nothing prunes automatically.
 
 ## Logs and retention
 
@@ -249,7 +270,9 @@ new name. `devstack remove --backup` refuses to delete anything when the backup 
 What keeps a bad plugin, a stuck request or a forgotten service from ruining the afternoon:
 
 - **launchd restarts** php-fpm, MySQL, Redis, Memcached and Mailpit if they crash (Homebrew sets `KeepAlive`).
-  nginx is the exception; the app notices within five minutes, notifies, and offers Restart.
+  nginx and dnsmasq have no such flag, so a LaunchAgent, `com.devstack.watchdog`, runs `devstack watchdog` every
+  five minutes: when launchd still has one of them loaded but no process is running, it restarts it, logs it
+  (`devstack logs watchdog`) and the app notifies. A service you stopped on purpose is unloaded and left alone.
 - **php-fpm pool guard** (`php/zz-devstack-fpm.conf`, installed for every version): 20 workers instead of Valet's 5
   (wp-admin fires several requests at once and the pool hit its ceiling on day one), workers recycled every 500
   requests, a request killed after 300 s, and anything slower than 15 s written with a stack trace to

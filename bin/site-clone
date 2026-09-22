@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# site-clone <source> <new-name> [--php X] [--json]
+# A copy of a site under a new name: backs the source up (the backup is kept), then imports that backup as
+# <new-name> with every URL rewritten to https://<new-name>.test and its own database and user.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+SRC="" ; NEW="" ; PHPV="" ; JSON=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--php) PHPV="$2"; shift ;; --php=*) PHPV="${1#--php=}" ;; --json) JSON=1 ;;
+		--*) die "unknown flag $1" ;;
+		*) if [ -z "$SRC" ]; then SRC="$1"; else NEW="$1"; fi ;;
+	esac
+	shift
+done
+[ -n "$SRC" ] && [ -n "$NEW" ] || die "usage: site-clone <source> <new-name> [--php X] [--json]"
+[ -L "$VALET_HOME/Sites/$SRC" ] || die "unknown site '$SRC'"
+[ ! -e "$SITES_DIR/$NEW" ] && [ ! -L "$VALET_HOME/Sites/$NEW" ] || die "$NEW already exists"
+log "=== site-clone $SRC -> $NEW"
+backup="$("$REPO_DIR/bin/site-backup" "$SRC" --json)" || die "backup of $SRC failed"
+dir="$(jq -r .path <<<"$backup")"
+args=("$NEW" "$dir" --json); [ -n "$PHPV" ] && args+=(--php "$PHPV")
+result="$("$REPO_DIR/bin/site-import" "${args[@]}")" || { echo "$result" | jq . >&2 2> /dev/null; die "import as $NEW failed (the backup is kept at $dir)"; }
+if [ "1" = "$JSON" ]; then jq --arg src "$SRC" --arg b "$dir" '. + {source:$src, backup:$b}' <<<"$result"
+else echo "$(jq -r .url <<<"$result")  cloned from $SRC (backup kept: $dir)"; fi

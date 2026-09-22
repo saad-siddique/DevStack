@@ -68,7 +68,7 @@ if [ "$expired" -gt 0 ]; then add fail "certificates" "$expired expired" "valet 
 # --- plumbing
 sudo -n -l "$VALET_BIN" > /dev/null 2>&1 && add ok "sudoers" "valet + brew trusted (no password prompts)" || add fail "sudoers" "valet trust missing" "valet trust"
 [ "$(readlink "$BREW_PREFIX/bin/devstack" 2> /dev/null)" = "$REPO_DIR/bin/devstack" ] && add ok "devstack link" "$BREW_PREFIX/bin/devstack -> this repo" || add warn "devstack link" "points elsewhere or missing" "./bootstrap.sh"
-for a in logs-prune upgrade; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh"; done
+for a in logs-prune upgrade watchdog; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh"; done
 free_gb="$(df -g "$HOME" | awk 'NR==2{print $4}')"
 [ "${free_gb:-0}" -ge 10 ] && add ok "disk" "${free_gb} GB free" || add warn "disk" "only ${free_gb} GB free" "devstack backups (delete old ones), brew cleanup, devstack logs-prune"
 bk="$(du -sk "$HOME/Backups/DevStack" 2> /dev/null | cut -f1 || true)"; [ "${bk:-0}" -gt $((20*1024*1024)) ] && add warn "backups" "$((bk/1024/1024)) GB in ~/Backups/DevStack" "delete backups you no longer need"
