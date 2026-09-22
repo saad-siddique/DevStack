@@ -216,3 +216,11 @@ table.sites td.actions .ic-group { display: inline-flex; gap: 2px; align-items: 
 .sites .meta .live-pill .ic { width: 20px; height: 20px; margin: 0; color: var(--on); }
 .sites .meta .live-pill .ic svg { width: 13px; height: 13px; }
 .sites .meta .live-pill .ic.done { color: var(--ink); }
+
+/* Icon buttons anywhere in the sites table (the live pill's copy button included), not only in the Actions column. */
+.sites .ic { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; vertical-align: middle; padding: 0; }
+.sites .ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sites .ic:hover { background: var(--chip); color: var(--accent); }
+.sites .meta .live-pill .ic { width: 20px; height: 20px; color: var(--on); }
+.sites .meta .live-pill .ic svg { width: 13px; height: 13px; }
+.sites .meta .live-pill .ic:hover { background: color-mix(in srgb, var(--on) 18%, transparent); color: var(--on); }

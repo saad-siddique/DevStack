@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# site-share <name> [--hostname H] [--json]   |   site-share --stop [--json]   |   site-share --status [--json]
+# site-share <name> [--hostname H] [--json]   |   site-share --stop [name] [--json]   |   site-share --status [--json]
+# --stop <name> unshares one site: its ingress rule is switched off in config.yml (commented with "#off", so the
+# hostname is kept for next time) and the tunnel restarts for the sites that remain; --stop alone ends everything.
 # Public URL for a local site through Cloudflare:
 #   * a NAMED tunnel when ~/.cloudflared/config.yml already maps a hostname to https://<name>.test (stable URL, good
 #     for webhooks you configure once). --hostname H rewrites/creates that ingress rule for the site first.
@@ -26,6 +28,31 @@ done
 mkdir -p "$DATA_DIR" "$LOG_DIR"
 
 state_pid() { [ -f "$STATE" ] && jq -r '.pid // empty' "$STATE" 2> /dev/null || true; }
+# rule_toggle <site> off|on : comment ("#off ") or uncomment the ingress rule whose service is https://<site>.test.
+rule_toggle() {
+	[ -f "$CONF" ] || return 0
+	python3 - "$CONF" "$1" "$TLD" "$2" <<'PY2'
+import re, sys
+path, site, tld, mode = sys.argv[1:5]
+s = open(path).read()
+svc = f"https://{site}.{tld}"
+# a rule block: optional comment line, "  - hostname:" line, then its indented lines; either live or "#off "-prefixed
+block = r"((?:(?:#off )?  #[^\n]*\n)?(?:#off )?  - hostname: [^\n]*\n(?:(?:#off )?    [^\n]*\n|(?:#off )?      [^\n]*\n)*)"
+out = []
+pos = 0
+for m in re.finditer(block, s):
+    text = m.group(1)
+    if svc in text:
+        lines = text.splitlines(keepends=True)
+        if mode == "off":
+            text = "".join(l if l.startswith("#off ") else "#off " + l for l in lines)
+        else:
+            text = "".join(l[5:] if l.startswith("#off ") else l for l in lines)
+    out.append(s[pos:m.start()]); out.append(text); pos = m.end()
+out.append(s[pos:])
+open(path, "w").write("".join(out))
+PY2
+}
 alive() { [ -n "$1" ] && kill -0 "$1" 2> /dev/null; }
 emit_status() {
 	local pid; pid="$(state_pid)"
@@ -40,6 +67,16 @@ emit_status() {
 case "$OP" in
 	status) emit_status; exit 0 ;;
 	stop)
+		if [ -n "$NAME" ] && [ -f "$CONF" ] && awk -v svc="https://$NAME.$TLD" '/^    service:/ && $2 == svc { f=1 } END { exit !f }' "$CONF"; then
+			cp "$CONF" "$CONF.bak"
+			rule_toggle "$NAME" off
+			log "unshared $NAME (rule kept off in config.yml)"
+			remaining="$(awk -v tld=".$TLD" '/^    service: https:\/\// { s=$2; sub("https://", "", s); if (s ~ tld"$") { sub(tld"$", "", s); print s } }' "$CONF" | head -1)"
+			if [ -n "$remaining" ]; then
+				# other sites stay public: restart the connector on the trimmed config
+				exec "$0" "$remaining" $([ "1" = "$JSON" ] && echo --json)
+			fi
+		fi
 		pid="$(state_pid)"
 		if alive "$pid"; then kill "$pid" 2> /dev/null || true; sleep 1; alive "$pid" && kill -9 "$pid" 2> /dev/null || true; log "stopped tunnel (pid $pid)"; fi
 		rm -f "$STATE"
@@ -83,6 +120,7 @@ PY
 		tunnel_name="$(awk '/^tunnel:/ { print $2; exit }' "$CONF")"
 		"$CF" tunnel route dns "$tunnel_name" "$HOSTNAME_WANT" > /dev/null 2>&1 && log "dns: $HOSTNAME_WANT -> tunnel $tunnel_name" || log "dns: could not add the CNAME automatically (already there, or run: cloudflared tunnel route dns $tunnel_name $HOSTNAME_WANT)"
 	fi
+	if grep -q "^#off .*https://$NAME\.$TLD\$" "$CONF"; then rule_toggle "$NAME" on; log "re-enabled the rule for $NAME"; fi
 	mapped_host="$(awk -v svc="https://$NAME.$TLD" '
 		/^  - hostname:/ { h=$3 }
 		/^    service:/ && $2 == svc { print h; exit }' "$CONF")"

@@ -161,7 +161,11 @@ if ( '' !== $api ) {
 		$op   = (string) ( $_POST['op'] ?? '' );
 		$name = (string) ( $_POST['name'] ?? '' );
 		if ( 'stop' === $op ) {
-			list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/site-share', '--stop', '--json' ), $home );
+			$args = array( $repo_bin . '/site-share', '--stop' );
+			if ( preg_match( '/^[a-z0-9][a-z0-9.-]*$/', $name ) ) { $args[] = $name; }   // one site; without a name: everything
+			$args[] = '--json';
+			set_time_limit( 90 );
+			list( $code, $out, $err ) = devstack_run( $args, $home );
 		} elseif ( 'start' === $op && preg_match( '/^[a-z0-9][a-z0-9.-]*$/', $name ) ) {
 			set_time_limit( 90 );
 			list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/site-share', $name, '--json' ), $home );

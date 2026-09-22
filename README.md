@@ -268,8 +268,10 @@ public URL through Cloudflare, detached, until you stop it:
   Cloudflare's edge answered 530/1033 for minutes on those, so set a named tunnel up once (`cloudflared tunnel login`,
   `cloudflared tunnel create <name>`) and forget about it.
 
-`--stop` ends the tunnel; `--status` and `devstack status` show it. In both the app and the dashboard the shared
-site's own row carries the public URL (copy, open) and the green globe stops it; nothing sits up top.
+`--stop <site>` unshares one site: its rule is switched off in `config.yml` (commented with `#off`, so a hand-picked
+hostname survives) and the tunnel restarts for the sites that remain; `--stop` alone ends everything. `--status` and
+`devstack status` show what is public. In both the app and the dashboard the shared site's own row carries the public
+URL (copy, open) and the green globe unshares that site; nothing sits up top.
 
 WordPress under a foreign hostname would normally redirect to its `.test` address. The `uo-local-share.php`
 mu-plugin, present in every site, does what the old per-developer "Cloudflare Tunnel Support" block in

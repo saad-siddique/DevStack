@@ -401,6 +401,8 @@ final class AppState: ObservableObject {
 		if let url = status?.share?.url, !url.isEmpty { copy(url); open(url) }
 	}
 	func stopSharing() async { await quick("share", ["share", "--stop", "--json"], label: "Public sharing stopped") }
+	/// One site only: its rule is switched off and the tunnel restarts for the rest.
+	func stopSharing(_ site: Site) async { await quick("share", ["share", "--stop", site.name, "--json"], label: "\(site.name) is no longer public") }
 	func setCache(_ site: Site, _ backend: String) { runJob(title: "\(site.name): object cache \(backend)", ["cache", site.name, backend, "--json"]) }
 	func savePoint(_ site: Site) { runJob(title: "Save point: \(site.name) database", ["backup", site.name, "--db-only", "--label", "save point", "--json"]) }
 	func rollBack(_ b: BackupEntry) { runJob(title: "Roll back \(b.name) database", ["restore", b.name, "--from", b.path, "--db-only", "--json"]) }

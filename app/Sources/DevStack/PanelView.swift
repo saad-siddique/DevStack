@@ -332,7 +332,7 @@ struct SiteRow: View {
 					}
 					if let u = liveUrl {
 						Button("Copy public URL") { state.copy(u) }
-						Button("Stop sharing") { Task { await state.stopSharing() } }.disabled(state.isBusy("share"))
+						Button("Stop sharing \(site.name)") { Task { await state.stopSharing(site) } }.disabled(state.isBusy("share"))
 					} else {
 						Button("Share publicly (Cloudflare tunnel)") { Task { await state.share(site) } }.disabled(state.isBusy("share"))
 					}

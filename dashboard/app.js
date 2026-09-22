@@ -255,7 +255,7 @@
 				var shareBtn = iconButton( isShared ? 'stop' : 'share', isShared ? 'Stop sharing (public tunnel is up)' : 'Share publicly through a Cloudflare tunnel', isShared ? 'live' : '' );
 				shareBtn.addEventListener( 'click', function () {
 					shareBtn.disabled = true;
-					post( 'share', isShared ? { op: 'stop' } : { op: 'start', name: site.name } ).then( refresh );
+					post( 'share', isShared ? { op: 'stop', name: site.name } : { op: 'start', name: site.name } ).then( refresh );
 				} );
 				group.appendChild( shareBtn );
 			}
