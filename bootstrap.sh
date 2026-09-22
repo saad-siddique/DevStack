@@ -3,6 +3,8 @@
 # Needs your sudo password once (valet install / valet trust); after that brew+valet are passwordless.
 set -euo pipefail
 
+# Never let a leftover MAMP PATH entry (old shells, IDE terminals) leak into brew/valet/php resolution.
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAMP' | paste -sd: -)"; export PATH
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BREW_PREFIX="$(brew --prefix)"
 COMPOSER_BIN="$HOME/.composer/vendor/bin"
@@ -33,8 +35,11 @@ ensure_brew() {
 
 ensure_formulae() {
 	log "Homebrew formulae"
-	brew tap shivammathur/php > /dev/null
-	if brew help trust > /dev/null 2>&1; then brew trust shivammathur/php > /dev/null 2>&1 || true; fi
+	local t
+	for t in shivammathur/php shivammathur/extensions; do
+		brew tap "$t" > /dev/null
+		if brew help trust > /dev/null 2>&1; then brew trust "$t" > /dev/null 2>&1 || true; fi
+	done
 	brew bundle install --file="$REPO_DIR/Brewfile" --no-upgrade
 	# mysql@8.4 is keg-only; wp db export/import want mysql/mysqldump on PATH.
 	brew link --force --overwrite mysql@8.4 > /dev/null 2>&1 || true
@@ -65,6 +70,60 @@ ensure_php_ini() {
 			ok "up to date: $dst"
 		fi
 	done
+}
+
+# Xdebug formulae drop conf.d/20-xdebug.ini (always on). First time we see one, switch it off; after that
+# bin/php-xdebug owns the state (marker file .xdebug-managed).
+ensure_xdebug_default_off() {
+	log "Xdebug default state"
+	local v d
+	for v in "${PHP_VERSIONS[@]}"; do
+		d="$BREW_PREFIX/etc/php/$v/conf.d"
+		[ -d "$d" ] || continue
+		if [ -f "$d/20-xdebug.ini" ] && [ ! -f "$d/.xdebug-managed" ]; then
+			mv "$d/20-xdebug.ini" "$d/20-xdebug.ini.off"; touch "$d/.xdebug-managed"
+			ok "PHP $v: xdebug installed, off (bin/php-xdebug on --php $v to enable)"
+		elif [ -f "$d/20-xdebug.ini" ]; then ok "PHP $v: xdebug ON"
+		elif [ -f "$d/20-xdebug.ini.off" ]; then ok "PHP $v: xdebug off"
+		else warn "PHP $v: xdebug not installed"
+		fi
+	done
+}
+
+PMA_DIR="$HOME/.local/share/local-devstack/phpmyadmin"
+ensure_phpmyadmin() {
+	log "phpMyAdmin"
+	if [ ! -f "$PMA_DIR/index.php" ]; then
+		local tmp; tmp="$(mktemp -d)"
+		curl -fsSL -o "$tmp/pma.zip" "https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip"
+		unzip -q "$tmp/pma.zip" -d "$tmp/x"
+		mkdir -p "$(dirname "$PMA_DIR")"; rm -rf "$PMA_DIR"
+		mv "$tmp"/x/phpMyAdmin-* "$PMA_DIR"; rm -rf "$tmp"
+		ok "downloaded $(sed -nE "s/.*'PMA_VERSION', '([^']+)'.*/\1/p" "$PMA_DIR/libraries/classes/Version.php" 2> /dev/null | head -1 || echo phpMyAdmin)"
+	fi
+	mkdir -p "$PMA_DIR/tmp"
+	if [ ! -f "$PMA_DIR/config.inc.php" ]; then
+		cat > "$PMA_DIR/config.inc.php" <<PHP
+<?php
+// local-devstack: local-only phpMyAdmin, auto-login as the Homebrew MySQL root (no password).
+declare(strict_types=1);
+\$cfg['blowfish_secret'] = '$(openssl rand -base64 24)';
+\$cfg['TempDir'] = __DIR__ . '/tmp';
+\$i = 1;
+\$cfg['Servers'][\$i]['host']            = '127.0.0.1';
+\$cfg['Servers'][\$i]['port']            = '3306';
+\$cfg['Servers'][\$i]['auth_type']       = 'config';
+\$cfg['Servers'][\$i]['user']            = 'root';
+\$cfg['Servers'][\$i]['password']        = '';
+\$cfg['Servers'][\$i]['AllowNoPassword'] = true;
+\$cfg['ShowPhpInfo']   = true;
+\$cfg['MaxNavigationItems'] = 250;
+PHP
+		ok "config.inc.php written"
+	fi
+	[ -L "$VALET_HOME/Sites/phpmyadmin" ] || ( cd "$PMA_DIR" && valet link phpmyadmin > /dev/null )
+	[ -f "$VALET_HOME/Certificates/phpmyadmin.test.crt" ] || valet secure phpmyadmin > /dev/null
+	ok "https://phpmyadmin.test"
 }
 
 ensure_composer_path() {
@@ -143,8 +202,10 @@ ensure_brew
 ensure_formulae
 ensure_php_linked
 ensure_php_ini
+ensure_xdebug_default_off
 ensure_composer_path
 ensure_valet
 ensure_services
 ensure_dashboard
+ensure_phpmyadmin
 log "Done. Next: bin/migrate-site <host>  (pilot: cleantest, clean-automator)"

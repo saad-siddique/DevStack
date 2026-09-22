@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# php-xdebug on|off|status [--php 8.4|7.4|all] [--json]
+# Xdebug comes prebuilt from shivammathur/extensions as conf.d/20-xdebug.ini. Off = that file renamed to .off.
+# Settings (mode=debug, start_with_request=trigger, port 9003) live in php/zz-uo-dev.ini and are inert while off.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+OP="" ; PHPV="all" ; JSON=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		on|off|status) OP="$1" ;;
+		--php) PHPV="$2"; shift ;;
+		--php=*) PHPV="${1#--php=}" ;;
+		--json) JSON=1 ;;
+		*) die "unknown argument $1" ;;
+	esac
+	shift
+done
+[ -n "$OP" ] || die "usage: php-xdebug on|off|status [--php 8.4|7.4|all] [--json]"
+PHPV="${PHPV#php@}"
+
+versions=()
+for d in "$BREW_PREFIX"/etc/php/*/conf.d; do
+	v="$(basename "$(dirname "$d")")"
+	[ -f "$d/20-xdebug.ini" ] || [ -f "$d/20-xdebug.ini.off" ] || continue
+	if [ "all" = "$PHPV" ] || [ "$PHPV" = "$v" ]; then versions+=("$v"); fi
+done
+[ "${#versions[@]}" -gt 0 ] || die "no Xdebug installed for PHP '$PHPV' (brew install shivammathur/extensions/xdebug@X.Y)"
+
+changed=()
+for v in "${versions[@]}"; do
+	d="$BREW_PREFIX/etc/php/$v/conf.d"
+	case "$OP" in
+		on)  if [ -f "$d/20-xdebug.ini.off" ]; then mv "$d/20-xdebug.ini.off" "$d/20-xdebug.ini"; changed+=("$v"); fi ;;
+		off) if [ -f "$d/20-xdebug.ini" ]; then mv "$d/20-xdebug.ini" "$d/20-xdebug.ini.off"; changed+=("$v"); fi ;;
+	esac
+	touch "$d/.xdebug-managed"
+done
+for v in "${changed[@]+"${changed[@]}"}"; do
+	"$REPO_DIR/bin/service" "php@$v" restart > /dev/null || log "warning: could not restart php@$v (is it managed by Valet?)"
+	log "php@$v: xdebug $OP"
+done
+
+out="$(for v in "${versions[@]}"; do
+	if [ -f "$BREW_PREFIX/etc/php/$v/conf.d/20-xdebug.ini" ]; then s=true; else s=false; fi
+	jq -n --arg v "$v" --argjson s "$s" '{($v): $s}'
+done | jq -s 'add')"
+if [ "1" = "$JSON" ]; then echo "$out"; else echo "$out" | jq -r 'to_entries[] | "php@\(.key): xdebug \(if .value then "ON" else "off" end)"'; fi
