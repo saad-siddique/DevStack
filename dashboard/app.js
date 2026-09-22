@@ -132,11 +132,14 @@
 	}
 
 	function renderTools( s ) {
+		var quick = $( 'quick' );
+		quick.textContent = '';
+		quick.appendChild( el( 'a', { 'class': 'act', href: s.tools.phpmyadmin, target: '_blank', rel: 'noopener', title: 'Every database, signed in as root', text: 'phpMyAdmin' } ) );
+		quick.appendChild( el( 'a', { 'class': 'act', href: s.tools.mailpit, target: '_blank', rel: 'noopener', title: 'Every outgoing mail from every site', text: 'Mailpit' } ) );
 		var list = $( 'tools' );
 		list.textContent = '';
-		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.phpmyadmin, target: '_blank', rel: 'noopener', text: 'phpMyAdmin' } ), document.createTextNode( ' — every database, signed in as root' ) ] ) );
-		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.mailpit, target: '_blank', rel: 'noopener', text: 'Mailpit' } ), document.createTextNode( ' — every outgoing mail from every site' ) ] ) );
-		list.appendChild( el( 'li', {}, [ el( 'a', { href: 'https://dashboard.test/?api=status', target: '_blank', rel: 'noopener', text: 'Status JSON' } ), document.createTextNode( ' — what this page reads (bin/stack-status)' ) ] ) );
+		list.appendChild( el( 'li', {}, [ el( 'a', { href: '?api=status', target: '_blank', rel: 'noopener', text: 'Status JSON' } ), document.createTextNode( ' — what this page reads (bin/stack-status)' ) ] ) );
+		list.appendChild( el( 'li', {}, [ el( 'a', { href: s.tools.phpmyadmin, target: '_blank', rel: 'noopener', text: 'phpMyAdmin' } ), document.createTextNode( ' and ' ), el( 'a', { href: s.tools.mailpit, target: '_blank', rel: 'noopener', text: 'Mailpit' } ), document.createTextNode( ' also sit top right on Overview.' ) ] ) );
 	}
 
 	function renderPorts( s ) {

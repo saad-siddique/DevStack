@@ -181,6 +181,7 @@ header( 'Cache-Control: no-store' );
 			<header class="tab-head">
 				<h2>Overview</h2>
 				<p class="summary" id="summary" aria-live="polite">Reading the stack…</p>
+				<div class="quick" id="quick" aria-label="Quick open"></div>
 			</header>
 			<ul class="strip" id="strip" aria-label="Service status"></ul>
 			<div class="panel-head">
