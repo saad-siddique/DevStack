@@ -31,6 +31,18 @@ ensure_formulae() {
 	ok "formulae present"
 }
 
+ensure_php_linked() {
+	log "CLI PHP = $DEFAULT_PHP"
+	local target
+	target="$(readlink "$BREW_PREFIX/bin/php" 2> /dev/null || true)"
+	case "$target" in
+		*"/Cellar/$DEFAULT_PHP/"*) ok "$BREW_PREFIX/bin/php -> $DEFAULT_PHP" ;;
+		*) brew unlink php > /dev/null 2>&1 || true
+		   brew link --force --overwrite "$DEFAULT_PHP" > /dev/null
+		   ok "linked $DEFAULT_PHP as $BREW_PREFIX/bin/php" ;;
+	esac
+}
+
 ensure_php_ini() {
 	log "PHP conf.d drop-ins"
 	local v dst
@@ -117,6 +129,7 @@ ensure_dashboard() {
 
 ensure_brew
 ensure_formulae
+ensure_php_linked
 ensure_php_ini
 ensure_composer_path
 ensure_valet
