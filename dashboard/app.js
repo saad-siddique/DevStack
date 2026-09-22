@@ -169,6 +169,30 @@
 	}
 
 	var sortBySize = 'size' === localStorage.getItem( 'sites.sort' );
+
+	// Inline SVG icons (24×24, stroked) matching the app's symbols: compass = open, gear = wp-admin, person+key = log in, globe = share.
+	var ICONS = {
+		open:   '<circle cx="12" cy="12" r="9"/><path d="M15.6 8.4l-2.3 5.3-5.3 2.3 2.3-5.3z"/>',
+		admin:  '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/><circle cx="12" cy="12" r="6.5"/>',
+		login:  '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5c0-3.3 2.5-5.5 5.5-5.5 1.3 0 2.4.4 3.4 1"/><circle cx="17" cy="14" r="2.3"/><path d="M18.6 15.6l3 3M20.2 17.2l1.4-1.4"/>',
+		share:  '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18"/>',
+		stop:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18M5 5l14 14"/>'
+	};
+	function icon( name ) {
+		var span = document.createElement( 'span' );
+		span.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + ICONS[ name ] + '</svg>';
+		return span.firstChild;
+	}
+	function iconLink( name, title, href ) {
+		var a = el( 'a', { 'class': 'ic', href: href, target: '_blank', rel: 'noopener', title: title, 'aria-label': title } );
+		a.appendChild( icon( name ) );
+		return a;
+	}
+	function iconButton( name, title, extraClass ) {
+		var b = el( 'button', { 'class': 'ic' + ( extraClass ? ' ' + extraClass : '' ), type: 'button', title: title, 'aria-label': title } );
+		b.appendChild( icon( name ) );
+		return b;
+	}
 	function fmtBytes( b ) { return fmtSize( b || 0 ); }
 
 	function renderSites( s ) {
@@ -205,19 +229,19 @@
 			] );
 			// Actions: the things you do to a site.
 			var actions = el( 'td', { 'class': 'actions' } );
-			actions.appendChild( el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: 'Open' } ) );
+			actions.appendChild( iconLink( 'open', 'Open ' + host, 'https://' + host ) );
 			if ( site.wp ) {
-				actions.appendChild( el( 'a', { href: 'https://' + host + '/wp-admin/', target: '_blank', rel: 'noopener', text: 'wp-admin' } ) );
-				var login = el( 'button', { 'class': 'linkish', type: 'button', title: 'One-time link, signed in as the first administrator', text: 'Log in' } );
+				actions.appendChild( iconLink( 'admin', 'Open wp-admin', 'https://' + host + '/wp-admin/' ) );
+				var login = iconButton( 'login', 'Log in to wp-admin (one-time link)' );
 				login.addEventListener( 'click', function () {
 					login.disabled = true;
 					post( 'login', { name: site.name } ).then( function ( r ) { login.disabled = false; if ( r && r.url ) { window.open( r.url, '_blank', 'noopener' ); } } );
 				} );
 				actions.appendChild( login );
 				var isShared = -1 !== sharing.indexOf( site.name );
-				var shareBtn = el( 'button', { 'class': 'linkish' + ( isShared ? ' live' : '' ), type: 'button', title: isShared ? 'Stop the public tunnel' : 'Public URL through a Cloudflare tunnel', text: isShared ? 'Unshare' : 'Share' } );
+				var shareBtn = iconButton( isShared ? 'stop' : 'share', isShared ? 'Stop sharing (public tunnel is up)' : 'Share publicly through a Cloudflare tunnel', isShared ? 'live' : '' );
 				shareBtn.addEventListener( 'click', function () {
-					shareBtn.disabled = true; shareBtn.textContent = isShared ? 'stopping…' : 'sharing…';
+					shareBtn.disabled = true;
 					post( 'share', isShared ? { op: 'stop' } : { op: 'start', name: site.name } ).then( refresh );
 				} );
 				actions.appendChild( shareBtn );
