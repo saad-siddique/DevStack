@@ -6,7 +6,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BREW_PREFIX="$(brew --prefix)"
 COMPOSER_BIN="$HOME/.composer/vendor/bin"
-VALET_BIN="$COMPOSER_BIN/valet"
+VALET_BIN="$BREW_PREFIX/bin/valet"   # the sudoers alias written by `valet trust` matches this path only
 VALET_HOME="$HOME/.config/valet"
 DEFAULT_PHP="php@8.4"
 PHP_VERSIONS=(8.4 7.4)
@@ -72,23 +72,25 @@ add_ipv6_listen() {
 	local f="$1"
 	[ -f "$f" ] || return 0
 	grep -q 'listen \[::1\]' "$f" && return 0
-	perl -0pi -e 's/^(\s*)listen 127\.0\.0\.1:(\d+)( ssl)?;/$&\n$1listen [::1]:$2$3;/mg' "$f"
+	perl -0pi -e 's/^(\s*)listen 127\.0\.0\.1:(\d+)([^;\n]*);/$&\n$1listen [::1]:$2$3;/mg' "$f"
 	ok "IPv6 listen added: $f"
 }
 
 ensure_valet() {
 	log "Laravel Valet"
-	if [ ! -x "$VALET_BIN" ]; then
+	if [ ! -x "$COMPOSER_BIN/valet" ]; then
 		composer global require laravel/valet --quiet
 		ok "valet installed via composer"
 	fi
+	[ -L "$VALET_BIN" ] || ln -s "$COMPOSER_BIN/valet" "$VALET_BIN"
 	# Patch stubs before install/secure so every generated conf carries the IPv6 listen.
 	local stub
 	for stub in valet.conf secure.valet.conf isolated.valet.conf secure.isolated.valet.conf; do
 		add_ipv6_listen "$HOME/.composer/vendor/laravel/valet/cli/stubs/$stub"
 	done
-	if [ ! -f "$VALET_HOME/config.json" ]; then
-		warn "valet install needs your sudo password"
+	# /etc/resolver/test is written by the last-but-one install step (dnsmasq); its absence means an incomplete install.
+	if [ ! -f "$VALET_HOME/config.json" ] || [ ! -f /etc/resolver/test ]; then
+		warn "valet install (asks for sudo unless already trusted)"
 		"$VALET_BIN" install
 	fi
 	if [ ! -f /etc/sudoers.d/valet ]; then
