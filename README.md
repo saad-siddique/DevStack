@@ -54,18 +54,65 @@ cd ~/Work/DevStack
 7. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`.
 8. With `--app`: builds `DevStack.app`, installs it into `/Applications` and starts it.
 
-Open a new terminal so `devstack` and `valet` are on your PATH, then:
+When it finishes, **DevStack.app is in `/Applications` and already running**: look for the server-rack icon in the
+menu bar, top right, next to the clock. Everything below can be done from that icon. Open a new terminal only if
+you also want the `devstack` command on your PATH.
 
-```bash
-devstack status | jq .        # every service should say "started"
-devstack new hello            # your first site: https://hello.test, wp-admin admin / admin1
-devstack login hello          # opens wp-admin already signed in
-```
+## Using the app
+
+**Where it is.** `/Applications/DevStack.app`. It has no Dock icon and no main window; it lives in the menu bar as
+a server-rack icon and opens a panel when clicked. Turn on *Start at login* in the panel's ⋯ menu and it will always
+be there. If the icon is missing, `devstack app open` starts it; `devstack app install` rebuilds it after an update.
+The icon changes to a warning triangle when a core service is down or launchd reports an error.
+
+**The panel**, top to bottom:
+
+- Header: how many services are online, how many sites, the default PHP version; a refresh button and the ⋯ menu
+  (dashboard, repo and Sites folders, Start at login, Quit).
+- Quick-open: **Dashboard** (`https://dashboard.test`), **phpMyAdmin** (every database, signed in as root) and
+  **Mailpit** with the count of caught mails.
+- **Stack load**: CPU and memory of the stack's own processes (php-fpm, nginx, mysqld, redis, memcached, mailpit,
+  dnsmasq) over the last three minutes. Sampled only while the panel is open.
+- **Sites**: every linked site with its PHP version and type. Lock = HTTPS, shield = protected. Per row: open the
+  site, log in to wp-admin (key icon), and a ⋯ menu with Open wp-admin, Open folder, Copy URL, Back up now, Remove….
+- **Services**: nginx, dnsmasq, MySQL, Mailpit, Redis, Memcached with an on/off switch and a restart button, plus who
+  owns each port.
+- **PHP**: every installed version with its php-fpm switch (the default version always runs) and an **Xdebug**
+  checkbox (trigger mode, port 9003; ticking it restarts that php-fpm).
+- Footer: **New site…** and **Import…**.
+
+**Doing things:**
+
+| Task | In the app |
+|---|---|
+| Create a site | New site… → name, PHP version, wp-admin username/password/email (`admin` / `admin1` prefilled) → Create site. WordPress is downloaded and installed; the task log ends with the URL, the credentials and a **Log in to wp-admin** button. |
+| Import a site | Import… → name, Choose… the LocalWP export `.zip`, a WordPress folder, or a DevStack backup folder; optionally a separate `.sql`; PHP version → Import site. |
+| Open a site | Compass icon on its row, or its URL `https://<name>.test`. |
+| Log in to wp-admin | Key icon on its row. A one-time link signs you in as the first administrator; nothing to type. |
+| Back up a site | ⋯ → Back up now. Files are cloned and the database dumped into `~/Backups/DevStack/<site>/<stamp>/`. |
+| Remove a site | ⋯ → Remove…. *Back up first* is ticked by default. Protected sites cannot be removed. |
+| Start/stop a service | Services tab → switch. Restart with the arrow. |
+| Switch Xdebug on or off | PHP tab → Xdebug checkbox on that version. |
+| Stop an idle PHP version | PHP tab → switch (the default version stays on). |
+| See what went wrong | Every long task streams its log into the task window; *Copy log* copies it. Stack logs are on the dashboard's Logs tab. |
+
+![New site](docs/img/new-site.png) ![Task log](docs/img/task.png)
+
+**How it works.** The app never talks to brew, Valet or MySQL itself. Every button runs the same `devstack …`
+command you could type, and reads its `--json` output, so the two never disagree. It reads status once a minute
+while the panel is open and once every five minutes while closed. Long tasks run in one ordinary window that
+survives the panel closing.
+
+**Building.** `devstack app install` builds the app with Swift Package Manager (Xcode or the Command Line Tools),
+signs it ad hoc (locally built apps carry no quarantine flag) and copies it to `/Applications`. With a Developer ID:
+`devstack app install --sign "Developer ID Application: …"` or `DEVSTACK_SIGN_IDENTITY`. `devstack app snapshot`
+renders every window to `docs/img/*.png` with made-up site names.
 
 ## Where things live
 
 | | |
 |---|---|
+| The app | `/Applications/DevStack.app`, built from `app/` |
 | Site files | `~/Sites/<name>` (`SITES_DIR=…` in your shell to use another folder) |
 | Valet state | `~/.config/valet`: `Sites/` links, `Nginx/` per-site confs, `Certificates/`, `Log/` |
 | Databases | `/opt/homebrew/var/mysql`; per site one `wp_<name>` schema and a `wp_<name>` user, `DB_HOST 127.0.0.1` |
@@ -74,13 +121,13 @@ devstack login hello          # opens wp-admin already signed in
 | Backups | `~/Backups/DevStack/<site>/<stamp>/` (`BACKUP_ROOT=…` to move them) |
 | Logs | `~/.config/valet/Log/` (nginx, PHP), `/opt/homebrew/var/log/` (php-fpm, redis, mailpit, rotation), `/opt/homebrew/var/mysql/*.err`, `<site>/wp-content/debug.log`; each `devstack` command appends to `~/Library/Logs/DevStack/<command>-<site>.log` |
 | phpMyAdmin | `~/.local/share/devstack/phpmyadmin` |
-| The app | `/Applications/DevStack.app`, built from `app/` |
 | This repo | wherever you cloned it; `devstack path` prints it |
 
-## Everyday commands
+## The terminal alternative: `devstack`
 
-`devstack` works from any directory. Verbs map to the scripts in `bin/`; any script name also works
-(`devstack site-new …`). Every command takes `--json` where a tool consumes the output.
+Everything the app does is a `devstack` verb, and a few things only exist there (migration from MAMP, log tails,
+`--json` output for scripts). It is on your PATH from any directory, with zsh completion. Verbs map to the scripts in
+`bin/`; any script name also works (`devstack site-new …`).
 
 ```bash
 devstack new myplugin --php 8.2                  # fresh WordPress at https://myplugin.test; wp-admin admin / admin1 unless
@@ -101,11 +148,13 @@ devstack logs php -n 100                         # tail one; `devstack logs cras
 devstack logs-prune                              # rotate now (the LaunchAgent does this daily at 04:00)
 devstack update                                  # git pull + bootstrap
 devstack app install | open | snapshot | status  # the menu-bar app
+devstack help                                    # all of the above
 ```
 
 ## Bringing your existing sites
 
-**From LocalWP.** In LocalWP, right-click the site and choose *Export* (keep everything selected). Then:
+**From LocalWP.** In LocalWP, right-click the site and choose *Export* (keep everything selected). In DevStack:
+**Import…**, pick the `.zip`, choose the PHP version, Import site. Or:
 
 ```bash
 devstack import client ~/Downloads/client.zip --php 8.2
@@ -117,10 +166,11 @@ creates `wp_client` and its user, imports the dump, points wp-config at the new 
 to `https://client.test`, links and secures the site and smoke-tests it. Users and passwords in the database are
 untouched, so your LocalWP credentials still work, and so does `devstack login client`.
 
-**From any host, or a folder plus a dump.** `devstack import name /path/to/wordpress --sql dump.sql` (`.sql.gz` works).
+**From any host, or a folder plus a dump.** Import… → Choose… the folder, then Choose… the dump; or
+`devstack import name /path/to/wordpress --sql dump.sql` (`.sql.gz` works).
 
-**From another DevStack machine.** `devstack backup site` there, copy the stamped folder over, `devstack import site
-<folder>` here. The manifest carries the PHP version.
+**From another DevStack machine.** Back up the site there (⋯ → Back up now), copy the stamped folder over, Import…
+it here. The manifest carries the PHP version.
 
 **From MAMP or MAMP PRO on the same machine.** Fill `sites.tsv` (host, folder, PHP, MAMP database, protected flag)
 and run `devstack migrate <host>` per site or `devstack migrate-all`. Each site's database is copied out of MAMP's
@@ -141,8 +191,8 @@ sites with its built-in drivers.
   `devstack service php@8.2 stop` or the switch on the app's PHP tab.
 - `wp` on your PATH is WP-CLI under PHP 8.4. Inside an isolated site use Valet's proxy so it matches the site's
   version: `valet php /opt/homebrew/bin/wp plugin list`. (`valet composer` does the same for Composer.)
-- Xdebug is installed for every version and off by default because it costs speed. `devstack xdebug on --php 8.4`
-  turns it on in trigger mode (port 9003, restarts that php-fpm); start a session with the `XDEBUG_TRIGGER=1` cookie,
+- Xdebug is installed for every version and off by default because it costs speed. The Xdebug checkbox on the app's
+  PHP tab, or `devstack xdebug on --php 8.4`, turns it on in trigger mode (port 9003, restarts that php-fpm); start a session with the `XDEBUG_TRIGGER=1` cookie,
   a browser helper extension, or `XDEBUG_TRIGGER=1 wp …`. No path mappings are needed, everything is local.
 
 ## Protected sites
@@ -153,7 +203,7 @@ read-only on the site.
 
 ## One-click login
 
-`devstack login <site>` (and the key icon or "Log in to wp-admin" in the app) mints a 48-hex one-time token, stores
+The key icon on a site row, "Log in to wp-admin" after creating a site, or `devstack login <site>`: each mints a 48-hex one-time token, stores
 its SHA-256 as a 60-second transient through WP-CLI, and opens `https://<site>.test/?uo_login=<token>`. The
 `uo-local-autologin.php` mu-plugin, installed into every site by `new`, `import`, `migrate` and on first `login`,
 checks that the host ends in `.test`, deletes the transient, compares hashes with `hash_equals`, sets the auth cookie
@@ -162,32 +212,11 @@ the first administrator (the first super admin on multisite).
 
 ## Backups
 
-`devstack backup <site>` writes `~/Backups/DevStack/<site>/<YYYYMMDD-HHMMSS>/` holding `files/` (an APFS clone of the
+⋯ → Back up now on a site row, or `devstack backup <site>`, writes `~/Backups/DevStack/<site>/<YYYYMMDD-HHMMSS>/` holding `files/` (an APFS clone of the
 site folder: instant, and space-free until either side changes), `db.sql.gz` (`mysqldump --force`, so a stale view
 cannot abort it) and `manifest.json` (name, PHP version, database, table count). A 260 MB site backs up in under
 three seconds. Restore or clone it with `devstack import <newname> <backup folder>`; every old URL is rewritten to the
 new name. `devstack remove --backup` refuses to delete anything when the backup fails. Nothing prunes backups for you.
-
-## Menu-bar app (DevStack.app)
-
-A SwiftUI `MenuBarExtra` (macOS 14+) that only ever runs `devstack …` and reads its `--json` output. The app has no
-brew, valet or MySQL knowledge of its own, so when a script changes the app does not.
-
-- Panel: stack summary, quick-open buttons (Dashboard, phpMyAdmin, Mailpit with unread count), a three-minute
-  CPU/memory chart of the stack's own processes, then Sites (open, log in to wp-admin, folder, back up, remove),
-  Services (switches, restart) and PHP (fpm switch, Xdebug checkbox).
-- New site (name, PHP, wp-admin username/password/email with `admin` / `admin1` defaults), Import, Remove and the
-  live task log open in one ordinary window, so a long import survives the panel closing. The task log ends with
-  the site URL, the credentials and a "Log in to wp-admin" button. Remove backs up first by default and is disabled
-  for protected sites.
-- Cadence is lean: one `devstack status` per minute while the panel is open, one per five minutes while closed (for
-  the icon), CPU samples only while the panel is open. The icon changes when a core service is down or launchd
-  reports an error.
-- `devstack app install` builds with Swift Package Manager (Xcode or the Command Line Tools), signs ad hoc (locally
-  built apps carry no quarantine flag) and installs to `/Applications`. With a Developer ID:
-  `devstack app install --sign "Developer ID Application: …"` or `DEVSTACK_SIGN_IDENTITY`.
-- `devstack app snapshot` renders every window to `docs/img/*.png` with made-up site names, without touching the menu bar.
-- "Start at login" is in the ⋯ menu.
 
 ## Logs and retention
 
@@ -207,7 +236,7 @@ brew, valet or MySQL knowledge of its own, so when a script changes the app does
 
 ```bash
 devstack update                 # git pull --ff-only, then bootstrap.sh
-devstack app install            # rebuild the app after app/ changed
+devstack app install            # rebuild and relaunch the app after app/ changed
 ```
 
 To remove DevStack (sites in `~/Sites` and databases under `/opt/homebrew/var/mysql` stay until you delete them):
