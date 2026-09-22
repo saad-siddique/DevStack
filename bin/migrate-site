@@ -70,6 +70,7 @@ if [ "0" = "$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.SCHEMATA 
 	dump="$LOG_DIR/$SITE_DB.$(date +%Y%m%d-%H%M%S).sql"
 	if [ "1" = "$DRY" ]; then
 		log "DRY: mysqldump $SITE_DB -> $dump ; mysql < $dump"
+		step_db="would import"
 	else
 		mysqldump_old --single-transaction --routines --triggers --default-character-set=utf8mb4 --databases "$SITE_DB" > "$dump"
 		mysql_new < "$dump"
@@ -84,7 +85,11 @@ log "db: $step_db"
 db_user="$(wp config get DB_USER)"
 db_pass="$(wp config get DB_PASSWORD)"
 u="$(sql_quote "$db_user")"; p="$(sql_quote "$db_pass")"; d="$(printf '%s' "$SITE_DB" | sed 's/`/``/g')"
-run mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
+if [ "1" = "$DRY" ]; then
+	log "DRY: ensure MySQL user $db_user with grants on $SITE_DB"
+else
+	mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
+fi
 log "db user: $db_user ensured"
 
 # 5. DB_HOST -> 127.0.0.1 (must happen BEFORE search-replace, or WP-CLI would edit MAMP's copy).
@@ -113,7 +118,7 @@ run wp cache flush --quiet 2> /dev/null || true
 log "urls: -> $SITE_URL"
 
 # 7. Local SSL mu-plugin.
-mkdir -p "$SITE_PATH/wp-content/mu-plugins"
+[ "1" = "$DRY" ] || mkdir -p "$SITE_PATH/wp-content/mu-plugins"
 if ! cmp -s "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$SITE_PATH/wp-content/mu-plugins/uo-local-ssl.php"; then
 	run cp "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$SITE_PATH/wp-content/mu-plugins/uo-local-ssl.php"
 fi

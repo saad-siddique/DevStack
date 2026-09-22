@@ -7,8 +7,8 @@ SITES_DIR="${SITES_DIR:-$HOME/Sites}"
 SITES_TSV="${SITES_TSV:-$REPO_DIR/sites.tsv}"
 LOG_DIR="${LOG_DIR:-$HOME/migration-log}"
 VALET_HOME="${VALET_HOME:-$HOME/.config/valet}"
-VALET_BIN="${VALET_BIN:-$BREW_PREFIX/bin/valet}"   # the sudoers alias written by `valet trust` matches this path only
 BREW_PREFIX="${BREW_PREFIX:-$(brew --prefix)}"
+VALET_BIN="${VALET_BIN:-$BREW_PREFIX/bin/valet}"   # the sudoers alias written by `valet trust` matches this path only
 DEFAULT_PHP="${DEFAULT_PHP:-php@8.4}"
 TLD="${TLD:-test}"
 
