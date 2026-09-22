@@ -3,7 +3,11 @@
 # Public URL for a local site through Cloudflare:
 #   * a NAMED tunnel when ~/.cloudflared/config.yml already maps a hostname to https://<name>.test (stable URL, good
 #     for webhooks you configure once). --hostname H rewrites/creates that ingress rule for the site first.
-#   * otherwise a QUICK tunnel (random *.trycloudflare.com URL, no account).
+#   * a site without a rule gets one automatically when a named tunnel exists: the hostname follows the pattern of the
+#     rules already there (saad-wp.example.com → saad-<site>.example.com) or settings.json share_hostname_pattern
+#     ("{site}" placeholder), and cloudflared creates the DNS record.
+#   * a QUICK tunnel (random *.trycloudflare.com URL) only when there is no named tunnel at all; the edge often answers
+#     530/1033 for a minute or longer on those.
 # The tunnel runs detached; state in $DATA_DIR/share.json (stack-status embeds it), log in $LOG_DIR/share.log.
 # The uo-local-share mu-plugin makes WordPress answer under the public hostname.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -82,6 +86,24 @@ PY
 	mapped_host="$(awk -v svc="https://$NAME.$TLD" '
 		/^  - hostname:/ { h=$3 }
 		/^    service:/ && $2 == svc { print h; exit }' "$CONF")"
+	# No rule yet but a named tunnel exists: mint a hostname from the pattern and add the rule (stable beats quick).
+	if [ -z "$mapped_host" ] && [ -z "$HOSTNAME_WANT" ] && grep -q '^tunnel:' "$CONF"; then
+		pattern="$(jq -r '.share_hostname_pattern // empty' "$DATA_DIR/settings.json" 2> /dev/null || true)"
+		if [ -z "$pattern" ]; then
+			# Derive from the first rule that already points at a .test site: label "saad-wp" + zone → "saad-{site}.zone".
+			example="$(awk -v tld=".$TLD" '/^  - hostname:/ { h=$3 } /^    service: https:\/\// { s=$2; if (s ~ tld"$") { print h; exit } }' "$CONF")"
+			if [ -n "$example" ]; then
+				label="${example%%.*}"; zone="${example#*.}"
+				case "$label" in *-*) prefix="${label%-*}-" ;; *) prefix="" ;; esac
+				pattern="${prefix}{site}.$zone"
+			fi
+		fi
+		if [ -n "$pattern" ]; then
+			HOSTNAME_WANT="${pattern//\{site\}/$NAME}"
+			log "no rule for $NAME yet; using $HOSTNAME_WANT (pattern $pattern; override: settings.json share_hostname_pattern)"
+			exec "$0" "$NAME" --hostname "$HOSTNAME_WANT" $([ "1" = "$JSON" ] && echo --json)
+		fi
+	fi
 fi
 
 # One tunnel at a time: stop whatever runs.
@@ -92,9 +114,10 @@ if [ -n "$mapped_host" ]; then
 	tunnel="$(awk '/^tunnel:/ { print $2; exit }' "$CONF")"
 	"$CF" tunnel run "$tunnel" < /dev/null >> "$SHARELOG" 2>&1 &
 	pid=$!; disown "$pid" 2> /dev/null || true; mode=named; url="https://$mapped_host"
-	# every hostname the named tunnel serves whose service is a local .test site
-	sites="$(awk -v tld=".$TLD" '/^    service: https:\/\// { s=$2; sub("https://", "", s); if (s ~ tld"$") { sub(tld"$", "", s); print s } }' "$CONF" | jq -R . | jq -s 'unique')"
-	urls="$(awk '/^  - hostname:/ { h=$3 } /^    service: https:\/\/.*\.test$/ { print "https://" h }' "$CONF" | jq -R . | jq -s 'unique')"
+	# every hostname the named tunnel serves whose service is a local .test site, as aligned site/url pairs
+	pairs="$(awk -v tld=".$TLD" '/^  - hostname:/ { h=$3 } /^    service: https:\/\// { s=$2; sub("https://", "", s); if (s ~ tld"$") { sub(tld"$", "", s); print s "\t" "https://" h } }' "$CONF" \
+		| sort -u | jq -R 'split("\t") | {site:.[0], url:.[1]}' | jq -s '.')"
+	sites="$(jq -c 'map(.site)' <<<"$pairs")"; urls="$(jq -c 'map(.url)' <<<"$pairs")"
 else
 	# --config /dev/null: without it cloudflared also loads ~/.cloudflared/config.yml, whose ingress catch-all (404) and
 	# credentials hijack the quick tunnel. http2 rather than QUIC, which many office networks block.
@@ -106,9 +129,9 @@ else
 	done
 	[ -n "$url" ] || { kill "$pid" 2> /dev/null; die "cloudflared gave no URL in 20 s (see $SHARELOG)"; }
 	log "quick tunnels can take a minute to answer (530 until then); for a stable URL use --hostname with your named tunnel"
-	sites="$(jq -n --arg n "$NAME" '[$n]')"; urls="$(jq -n --arg u "$url" '[$u]')"
+	sites="$(jq -n --arg n "$NAME" '[$n]')"; urls="$(jq -n --arg u "$url" '[$u]')"; pairs="$(jq -n --arg n "$NAME" --arg u "$url" '[{site:$n,url:$u}]')"
 fi
-jq -n --arg mode "$mode" --argjson pid "$pid" --argjson sites "$sites" --argjson urls "$urls" --arg url "$url" --arg site "$NAME" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-	'{mode:$mode,pid:$pid,site:$site,url:$url,sites:$sites,urls:$urls,started:$at}' > "$STATE"
+jq -n --arg mode "$mode" --argjson pid "$pid" --argjson sites "$sites" --argjson urls "$urls" --argjson pairs "$pairs" --arg url "$url" --arg site "$NAME" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+	'{mode:$mode,pid:$pid,site:$site,url:$url,sites:$sites,urls:$urls,pairs:$pairs,started:$at}' > "$STATE"
 log "sharing $NAME at $url ($mode tunnel, pid $pid)"
 if [ "1" = "$JSON" ]; then jq '. + {running:true,ok:true}' "$STATE"; else echo "$url"; fi

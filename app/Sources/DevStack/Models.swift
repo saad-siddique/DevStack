@@ -22,6 +22,12 @@ struct StackStatus: Decodable {
 		let sites: [String]?
 		let urls: [String]?
 		let started: String?
+		/// The public URL for one site, if the running tunnel serves it.
+		func url(for name: String) -> String? {
+			let s = sites ?? [site ?? ""], u = urls ?? [url ?? ""]
+			guard let i = s.firstIndex(of: name) else { return nil }
+			return i < u.count ? u[i] : u.first
+		}
 	}
 
 	struct Sizes: Decodable {

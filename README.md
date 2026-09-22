@@ -253,17 +253,28 @@ the first administrator (the first super admin on multisite).
 
 ## Sharing a site publicly
 
-`devstack share <site>` starts a Cloudflare tunnel detached and prints the URL. If `~/.cloudflared/config.yml` has an
-ingress rule whose `service` is `https://<site>.test`, the *named* tunnel runs and the URL is that stable hostname,
-which is what you want for webhooks you configure once at Zapier or Stripe. `devstack share <site> --hostname
-saad-wp.example.com` rewrites or adds that rule (pointing it at the site with `noTLSVerify` and the right host
-header) before starting. Without a mapping you get a quick tunnel: a random `*.trycloudflare.com` URL, no account.
-`--stop` ends it; `--status` and `devstack status` show it; the app and the dashboard show the URL with Stop.
+`devstack share <site>`, or the globe in the app's site menu and the dashboard's Actions column, gives a local site a
+public URL through Cloudflare, detached, until you stop it:
+
+- **A hostname on your zone (the reliable path).** If `~/.cloudflared/config.yml` has an ingress rule whose
+  `service` is `https://<site>.test`, the named tunnel runs and that hostname is the URL. A site without a rule gets
+  one automatically: the hostname follows the pattern of the rules already there (`saad-wp.example.com` becomes
+  `saad-<site>.example.com`; override with `share_hostname_pattern` in `~/.local/share/devstack/settings.json`,
+  `{site}` as placeholder), the rule is written with the right host header and `noTLSVerify`, and `cloudflared tunnel
+  route dns` creates the DNS record. Stable URLs, so webhooks configured once at Zapier or Stripe keep working.
+  `--hostname H` picks the name by hand. Note that the named tunnel serves every hostname in the file at once: while
+  it runs, all mapped sites are public, and each shows a green *live* pill in its row.
+- **Quick tunnel (fallback only).** Without any named tunnel you get a random `*.trycloudflare.com` URL. In practice
+  Cloudflare's edge answered 530/1033 for minutes on those, so set a named tunnel up once (`cloudflared tunnel login`,
+  `cloudflared tunnel create <name>`) and forget about it.
+
+`--stop` ends the tunnel; `--status` and `devstack status` show it. In both the app and the dashboard the shared
+site's own row carries the public URL (copy, open) and the green globe stops it; nothing sits up top.
 
 WordPress under a foreign hostname would normally redirect to its `.test` address. The `uo-local-share.php`
-mu-plugin, present in every site, filters `home`/`siteurl` to the request host when Cloudflare headers are present,
-marks the request HTTPS and disables canonical redirects, so pages, assets and REST callbacks all use the public URL.
-No per-developer `wp-config.php` block is needed any more.
+mu-plugin, present in every site, filters `home`/`siteurl` to the request host when Cloudflare headers are present
+(at priority 99, above a `WP_HOME` constant), marks the request HTTPS and disables canonical redirects, so pages,
+assets and REST callbacks all use the public URL. No per-developer `wp-config.php` block is needed any more.
 
 ## Backups, archive, restore, clone
 

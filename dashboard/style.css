@@ -208,3 +208,11 @@ table.sites td.actions .ic-group { display: inline-flex; gap: 2px; align-items: 
 	.panel-head .filter { flex-basis: 100%; }
 	.panel-head .filter input { width: 100%; }
 }
+
+/* A shared site: a quiet green pill in its own row, not a notice up top. */
+.sites .meta .live-pill { display: inline-flex; align-items: center; gap: 6px; padding: 1px 4px 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--on) 12%, var(--surface)); font-size: 11.5px; }
+.sites .meta .live-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--on); box-shadow: 0 0 6px var(--on-glow); }
+.sites .meta .live-pill a { color: var(--on); font-weight: 600; text-decoration: none; }
+.sites .meta .live-pill .ic { width: 20px; height: 20px; margin: 0; color: var(--on); }
+.sites .meta .live-pill .ic svg { width: 13px; height: 13px; }
+.sites .meta .live-pill .ic.done { color: var(--ink); }

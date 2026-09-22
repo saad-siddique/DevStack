@@ -176,7 +176,8 @@
 		admin:  '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/><circle cx="12" cy="12" r="6.5"/>',
 		login:  '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5c0-3.3 2.5-5.5 5.5-5.5 1.3 0 2.4.4 3.4 1"/><circle cx="17" cy="14" r="2.3"/><path d="M18.6 15.6l3 3M20.2 17.2l1.4-1.4"/>',
 		share:  '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18"/>',
-		stop:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18M5 5l14 14"/>'
+		stop:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18M5 5l14 14"/>',
+		copy:   '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>'
 	};
 	function icon( name ) {
 		var span = document.createElement( 'span' );
@@ -222,6 +223,16 @@
 			}
 			if ( site.object_cache ) { meta.appendChild( el( 'span', { 'class': 'badge cache', title: 'persistent object cache', text: site.object_cache } ) ); }
 			if ( site.protected ) { meta.appendChild( el( 'span', { 'class': 'badge', title: 'Protected: tooling never removes it', text: 'protected' } ) ); }
+			var liveUrl = shareUrlFor( s, site.name );
+			if ( liveUrl ) {
+				var live = el( 'span', { 'class': 'live-pill', title: 'Public through a Cloudflare tunnel' } );
+				live.appendChild( el( 'i', { 'aria-hidden': 'true' } ) );
+				live.appendChild( el( 'a', { href: liveUrl, target: '_blank', rel: 'noopener', text: liveUrl.replace( /^https?:\/\//, '' ) } ) );
+				var copy = iconButton( 'copy', 'Copy public URL' );
+				copy.addEventListener( 'click', function () { navigator.clipboard.writeText( liveUrl ).then( function () { copy.classList.add( 'done' ); setTimeout( function () { copy.classList.remove( 'done' ); }, 1200 ); } ); } );
+				live.appendChild( copy );
+				meta.appendChild( live );
+			}
 			if ( site.fatals_recent ) { meta.appendChild( el( 'span', { 'class': 'badge fatals', title: 'PHP fatal errors in debug.log today or yesterday — Logs tab, wp ' + site.name, text: site.fatals_recent + ( 1 === site.fatals_recent ? ' fatal' : ' fatals' ) } ) ); }
 			var nameCell = el( 'td', { 'class': 'name' }, [
 				el( 'div', { 'class': 'title' }, [ star, el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: host } ) ] ),
@@ -366,20 +377,13 @@
 		navDot( 'logs', crashes.length > 0 );
 	}
 
-	// Public tunnel (bin/site-share): URL(s), sites, Stop.
-	function renderShare( s ) {
-		var box = $( 'share' );
-		box.textContent = '';
-		if ( ! s.share ) { box.hidden = true; return; }
-		var urls = s.share.urls || [ s.share.url ];
-		var text = el( 'div', { 'class': 'text' } );
-		text.appendChild( el( 'p', { 'class': 'ok', text: 'Sharing ' + ( s.share.sites || [ s.share.site ] ).join( ', ' ) + ' publicly (' + s.share.mode + ' tunnel)' } ) );
-		urls.forEach( function ( u ) { text.appendChild( el( 'p', {}, [ el( 'a', { href: u, target: '_blank', rel: 'noopener', text: u } ) ] ) ); } );
-		var actions = el( 'div', { 'class': 'actions' } );
-		actions.appendChild( button( 'Stop sharing', 'quiet', function () { return post( 'share', { op: 'stop' } ); } ) );
-		box.appendChild( text );
-		box.appendChild( actions );
-		box.hidden = false;
+	// Public tunnel (bin/site-share): shown in the site's own row (renderSites), nothing up top.
+	function renderShare( s ) { $( 'share' ).hidden = true; }
+	function shareUrlFor( s, name ) {
+		if ( ! s.share ) { return null; }
+		var sites = s.share.sites || [ s.share.site ], urls = s.share.urls || [ s.share.url ];
+		var i = sites.indexOf( name );
+		return -1 === i ? null : ( urls[ i ] || urls[ 0 ] );
 	}
 
 	// Homebrew state of the stack (bin/stack-upgrade): what the nightly run did, what waits, and the nightly setting.

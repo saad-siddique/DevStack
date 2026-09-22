@@ -21,9 +21,6 @@ struct PanelView: View {
 				if let up = state.status?.upgrades, up.hasNews {
 					StackUpgradeLine(upgrades: up, upgradeAll: { state.runUpgrade(all: true) }, upgradePatches: { state.runUpgrade(all: false) })
 				}
-				if let sh = state.status?.share {
-					ShareLine(share: sh, copy: { state.copy($0) }, open: { state.open($0) }, stop: { Task { await state.stopSharing() } }, busy: state.isBusy("share"))
-				}
 				if !state.runaways.isEmpty {
 					RunawayLine(runaways: state.runaways, restart: { svc in Task { await state.restartService(named: svc) } }, busy: { state.isBusy($0) })
 				}
@@ -257,9 +254,12 @@ struct SiteRow: View {
 
 	private var fatals: Int { site.fatalsRecent ?? 0 }
 
+	private var liveUrl: String? { state.status?.share?.url(for: site.name) }
+
 	/// One quiet line under the name: version, footprint, then anything unusual.
 	private var subtitle: String {
 		var parts = ["PHP \(site.php == "default" ? (state.status?.defaultPhp?.version ?? "default") : site.php)"]
+		if let u = liveUrl { parts.insert("live · \(u.replacingOccurrences(of: "https://", with: ""))", at: 0) }
 		if let v = fpmStopped { parts[0] += " (php-fpm \(v) stopped)" }
 		if let size = site.sizeText { parts.append(size) }
 		if !site.wp { parts.append("static") }
@@ -285,6 +285,10 @@ struct SiteRow: View {
 			if state.isBusy(site.name) { ProgressView().controlSize(.mini).frame(width: 16) }
 			Button { state.open(site.url) } label: { Image(systemName: "safari").font(.system(size: 12)) }
 				.buttonStyle(.plain).foregroundStyle(t.muted).help("Open \(site.url)")
+			if let u = liveUrl {
+				Button { state.open(u) } label: { Image(systemName: "globe").font(.system(size: 12, weight: .semibold)) }
+					.buttonStyle(.plain).foregroundStyle(t.ok).help("Public at \(u) — ⋯ menu to copy or stop")
+			}
 			if site.wp {
 				Button { state.open(site.adminUrl) } label: { Image(systemName: "gearshape").font(.system(size: 12)) }
 					.buttonStyle(.plain).foregroundStyle(t.muted).help("Open wp-admin")
@@ -326,8 +330,12 @@ struct SiteRow: View {
 								.disabled(current)
 						}
 					}
-					Button(state.status?.share != nil && (state.status?.share?.sites ?? []).contains(site.name) ? "Sharing publicly…" : "Share publicly (Cloudflare tunnel)") { Task { await state.share(site) } }
-						.disabled(state.isBusy("share"))
+					if let u = liveUrl {
+						Button("Copy public URL") { state.copy(u) }
+						Button("Stop sharing") { Task { await state.stopSharing() } }.disabled(state.isBusy("share"))
+					} else {
+						Button("Share publicly (Cloudflare tunnel)") { Task { await state.share(site) } }.disabled(state.isBusy("share"))
+					}
 					Divider()
 					Button("Save point (database)") { present(.task); state.savePoint(site) }
 				}
