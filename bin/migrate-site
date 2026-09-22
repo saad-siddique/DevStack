@@ -27,7 +27,7 @@ log "=== migrate-site $SITE_HOST ($SITE_FOLDER, $SITE_PHP, db=$SITE_DB) DRY=$DRY
 # 1. Link (explicit, never parked).
 step_link=skipped
 if [ ! -L "$VALET_HOME/Sites/$SITE_HOST" ]; then
-	( cd "$SITE_PATH" && run valet link "$SITE_HOST" )
+	( cd "$SITE_PATH" && run valet link "$SITE_HOST" >&2 )
 	step_link=linked
 fi
 log "link: $step_link"
@@ -38,10 +38,10 @@ if [ "$SITE_PHP" != "$DEFAULT_PHP" ]; then
 	if [ "$(cat "$SITE_PATH/.valetrc" 2> /dev/null)" != "php=$SITE_PHP" ]; then
 		[ "1" = "$DRY" ] || printf 'php=%s\n' "$SITE_PHP" > "$SITE_PATH/.valetrc"
 	fi
-	if valet isolated 2> /dev/null | grep -q "^| *$SITE_HOST "; then
+	if valet isolated 2> /dev/null | grep -qE "^\| *$SITE_HOST(\.$TLD)? "; then
 		step_isolate="already $SITE_PHP"
 	else
-		run valet isolate "$SITE_PHP" --site="$SITE_HOST"
+		run valet isolate "$SITE_PHP" --site="$SITE_HOST" >&2
 		step_isolate="isolated $SITE_PHP"
 	fi
 fi
@@ -50,7 +50,7 @@ log "php: $step_isolate"
 # 3. HTTPS.
 step_secure=already
 if [ ! -f "$VALET_HOME/Certificates/$SITE_HOST.$TLD.crt" ]; then
-	run valet secure "$SITE_HOST"
+	run valet secure "$SITE_HOST" >&2
 	step_secure=secured
 fi
 log "https: $step_secure"
