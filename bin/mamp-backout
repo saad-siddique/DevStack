@@ -64,11 +64,26 @@ else
 	ok "guard already in ~/.zshrc"
 fi
 
+# Symlinks or wrapper scripts in user bin dirs that point into /Applications/MAMP (e.g. ~/.local/bin/php).
+for d in "$HOME/.local/bin" "$HOME/bin" /usr/local/bin; do
+	[ -d "$d" ] || continue
+	for f in "$d"/*; do
+		[ -e "$f" ] || [ -L "$f" ] || continue
+		t="$(readlink "$f" 2> /dev/null || true)"
+		if [[ "$t" == *"/Applications/MAMP"* ]] || { [ -f "$f" ] && [ ! -L "$f" ] && /usr/bin/grep -q "/Applications/MAMP" "$f" 2> /dev/null; }; then
+			mkdir -p "$B/bin-links"
+			if [ -w "$d" ]; then mv "$f" "$B/bin-links/"; else sudo mv "$f" "$B/bin-links/"; fi
+			ok "moved MAMP-pointing $f to $B/bin-links/"
+		fi
+	done
+done
+
 log "4/4 verify"
 printf '  hosts MAMP lines: %s\n' "$(/usr/bin/grep -cE 'MAMP PRO|## Local - Start' /etc/hosts || true)"
 printf '  helper running:   %s\n' "$(pgrep -f mampprohelper > /dev/null && echo yes || echo no)"
 printf '  plist present:    %s\n' "$([ -f "$PLIST" ] && echo yes || echo no)"
 printf '  login-shell PATH has MAMP: %s\n' "$(zsh -lc 'echo $PATH' | tr ':' '\n' | /usr/bin/grep -c '^/Applications/MAMP' || true)"
 printf '  php alias in login shell:  %s\n' "$(zsh -lic 'alias php' 2> /dev/null || echo none)"
-printf '  which php/mysql/wp: %s\n' "$(zsh -lc 'which php mysql wp' | paste -sd' ' -)"
+printf '  which php/mysql/wp: %s\n' "$(env -i HOME="$HOME" USER="$USER" SHELL=/bin/zsh TERM=xterm /bin/zsh -lic 'which php mysql wp' 2> /dev/null | paste -sd' ' -)"
+printf '  php on a clean login shell: %s\n' "$(env -i HOME="$HOME" USER="$USER" SHELL=/bin/zsh TERM=xterm /bin/zsh -lic 'php -v' 2> /dev/null | head -1)"
 printf '  .test still resolves: %s\n' "$(dig +short dashboard.test @127.0.0.1 | head -1)"
