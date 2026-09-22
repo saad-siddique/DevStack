@@ -1,6 +1,7 @@
 // Snapshot.swift — `DevStack --snapshot <dir>` renders the panel and each form into PNGs and quits.
 // Used by `devstack app snapshot` for the README and for checking the UI without clicking through the menu bar.
-// It captures the app's own windows, which needs no screen-recording permission.
+// It shows fixture sites (never the machine's real ones) and captures the app's own windows, which needs no
+// screen-recording permission.
 import AppKit
 import SwiftUI
 
@@ -14,7 +15,7 @@ enum Snapshot {
 	}
 
 	private static func run(state: AppState, dir: String) async {
-		for _ in 0 ..< 80 where state.status == nil { try? await Task.sleep(for: .milliseconds(250)) }
+		state.freeze(with: fixture)
 		try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 		state.sampler.start()
 		try? await Task.sleep(for: .seconds(7))          // a few load samples so the chart has a line
@@ -27,17 +28,41 @@ enum Snapshot {
 			state.modal = .remove(site)
 			await capture(ModalView().environmentObject(state), "remove", dir)
 		}
-		state.task = TaskLog(title: "Back up cleantest", command: "devstack backup cleantest --json",
-		                     lines: ["12:28:36 === site-backup cleantest -> ~/Backups/local-devstack/cleantest/20260922-122836",
-		                             "12:28:37 db: dumping wp_cleantest_db (43 tables)", "12:28:37 db: 332K compressed",
-		                             "12:28:39 files: cloned 10546 files", "12:28:39 done: ~/Backups/local-devstack/cleantest/20260922-122836 (264M on disk)"]
+		state.task = TaskLog(title: "Back up acme-shop", command: "devstack backup acme-shop --json",
+		                     lines: ["12:28:36 === site-backup acme-shop -> ~/Backups/DevStack/acme-shop/20260922-122836",
+		                             "12:28:37 db: dumping wp_acme_shop (43 tables)", "12:28:37 db: 332K compressed",
+		                             "12:28:39 files: cloned 10546 files", "12:28:39 done: ~/Backups/DevStack/acme-shop/20260922-122836 (264M on disk)"]
 		                        .map { Devstack.Line(isError: true, text: $0) },
 		                     running: false, exitStatus: 0,
-		                     result: JobResult(name: "cleantest", url: nil, path: NSHomeDirectory() + "/Backups/local-devstack/cleantest/20260922-122836", adminUser: nil, adminPassword: nil, ok: true))
+		                     result: JobResult(name: "acme-shop", url: nil, path: NSHomeDirectory() + "/Backups/DevStack/acme-shop/20260922-122836", adminUser: nil, adminPassword: nil, ok: true))
 		state.modal = .task
 		await capture(ModalView().environmentObject(state), "task", dir)
 		print("snapshots written to \(dir)")
 		NSApp.terminate(nil)
+	}
+
+	/// Made-up sites so screenshots never show a real machine's inventory.
+	private static var fixture: StackStatus {
+		let home = NSHomeDirectory()
+		func site(_ n: String, _ php: String, wp: Bool = true, protected: Bool = false) -> Site {
+			Site(name: n, php: php, secured: true, wp: wp, path: "\(home)/Sites/\(n)", protected: protected)
+		}
+		func svc(_ n: String, _ u: String) -> Service { Service(name: n, status: "started", user: u) }
+		func php(_ v: String, _ full: String, fpm: Bool, def: Bool = false, sites: Int = 0) -> PhpVersion {
+			PhpVersion(version: v, full: full, formula: v == "8.5" ? "php" : "php@\(v)", fpm: fpm ? "started" : "none", isDefault: def, sites: sites, xdebug: false)
+		}
+		return StackStatus(
+			generatedAt: "2026-09-22T12:00:00Z",
+			services: [svc("dnsmasq", "root"), svc("mailpit", "dev"), svc("memcached", "dev"), svc("mysql@8.4", "dev"), svc("nginx", "root"), svc("redis", "dev"),
+			           svc("php@7.4", "root"), svc("php@8.2", "root"), svc("php@8.4", "root")],
+			php: [php("7.4", "7.4.33", fpm: true, sites: 2), php("8.0", "8.0.30", fpm: false), php("8.1", "8.1.33", fpm: false),
+			      php("8.2", "8.2.29", fpm: true, sites: 1), php("8.3", "8.3.26", fpm: false), php("8.4", "8.4.13", fpm: true, def: true, sites: 4),
+			      php("8.5", "8.5.2", fpm: false), php("8.6", "8.6.0", fpm: false)],
+			sites: [site("acme-shop", "default"), site("client-blog", "8.2"), site("company-docs", "7.4"), site("landing-page", "default", wp: false),
+			        site("legacy-intranet", "7.4"), site("plugin-dev", "default", protected: true), site("staging-mirror", "default")],
+			ports: ["80": "nginx", "443": "nginx", "3306": "mysql", "1025": "mailpit", "8025": "mailpit", "6379": "redis", "11211": "memcached"],
+			mysql: MySQLInfo(version: "8.4.6", qps: 0.4),
+			mail: MailInfo(backend: "mailpit", total: 3))
 	}
 
 	private static func capture<V: View>(_ view: V, _ name: String, _ dir: String) async {

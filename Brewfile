@@ -1,4 +1,4 @@
-# local-devstack Brewfile — `brew bundle --file=Brewfile`
+# DevStack Brewfile — `brew bundle --file=Brewfile`
 tap "shivammathur/php"
 tap "shivammathur/extensions"
 

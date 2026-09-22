@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# local-devstack bootstrap [--app]: idempotent. Run it again any time.
+# DevStack bootstrap [--app]: idempotent. Run it again any time.
 # Needs your sudo password once (valet install / valet trust); after that brew+valet are passwordless.
 # --app also builds the menu-bar app from app/ and installs it to /Applications/DevStack.app.
 set -euo pipefail
@@ -98,9 +98,15 @@ ensure_xdebug_default_off() {
 	done
 }
 
-PMA_DIR="$HOME/.local/share/local-devstack/phpmyadmin"
+PMA_DIR="$HOME/.local/share/devstack/phpmyadmin"
 ensure_phpmyadmin() {
 	log "phpMyAdmin"
+	# Installs from before the DevStack rename live under local-devstack/; move them instead of downloading again.
+	local old="$HOME/.local/share/local-devstack/phpmyadmin"
+	if [ -d "$old" ] && [ ! -d "$PMA_DIR" ]; then
+		mkdir -p "$(dirname "$PMA_DIR")"; mv "$old" "$PMA_DIR"; rmdir "$(dirname "$old")" 2> /dev/null || true
+		ok "moved phpMyAdmin to $PMA_DIR"
+	fi
 	if [ ! -f "$PMA_DIR/index.php" ]; then
 		local tmp; tmp="$(mktemp -d)"
 		curl -fsSL -o "$tmp/pma.zip" "https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.zip"
@@ -113,7 +119,7 @@ ensure_phpmyadmin() {
 	if [ ! -f "$PMA_DIR/config.inc.php" ]; then
 		cat > "$PMA_DIR/config.inc.php" <<PHP
 <?php
-// local-devstack: local-only phpMyAdmin, auto-login as the Homebrew MySQL root (no password).
+// DevStack: local-only phpMyAdmin, auto-login as the Homebrew MySQL root (no password).
 declare(strict_types=1);
 \$cfg['blowfish_secret'] = '$(openssl rand -base64 24)';
 \$cfg['TempDir'] = __DIR__ . '/tmp';
@@ -129,7 +135,8 @@ declare(strict_types=1);
 PHP
 		ok "config.inc.php written"
 	fi
-	[ -L "$VALET_HOME/Sites/phpmyadmin" ] || ( cd "$PMA_DIR" && valet link phpmyadmin > /dev/null )
+	if [ ! -L "$VALET_HOME/Sites/phpmyadmin" ]; then ( cd "$PMA_DIR" && valet link phpmyadmin > /dev/null )
+	elif [ "$(readlink "$VALET_HOME/Sites/phpmyadmin")" != "$PMA_DIR" ]; then ln -sfn "$PMA_DIR" "$VALET_HOME/Sites/phpmyadmin"; ok "re-pointed the phpmyadmin link"; fi
 	[ -f "$VALET_HOME/Certificates/phpmyadmin.test.crt" ] || valet secure phpmyadmin > /dev/null
 	ok "https://phpmyadmin.test"
 }
@@ -138,7 +145,7 @@ ensure_composer_path() {
 	log "Composer global bin on PATH"
 	local line='export PATH="$HOME/.composer/vendor/bin:$PATH"'
 	if ! grep -qF "$line" "$HOME/.zshrc" 2> /dev/null; then
-		printf '\n# local-devstack: Laravel Valet\n%s\n' "$line" >> "$HOME/.zshrc"
+		printf '\n# DevStack: Laravel Valet\n%s\n' "$line" >> "$HOME/.zshrc"
 		ok "added to ~/.zshrc"
 	fi
 	export PATH="$COMPOSER_BIN:$PATH"
@@ -220,8 +227,13 @@ ensure_services() {
 # restarted through the trusted brew path). Keeps today + yesterday, so nothing older than 48 h survives.
 ensure_log_pruning() {
 	log "Log rotation"
-	local label="com.local-devstack.logs-prune" plist="$HOME/Library/LaunchAgents/com.local-devstack.logs-prune.plist" tmp
+	local label="com.devstack.logs-prune" plist="$HOME/Library/LaunchAgents/com.devstack.logs-prune.plist" tmp
 	mkdir -p "$HOME/Library/LaunchAgents" "$BREW_PREFIX/var/log"
+	# Pre-rename agent (com.local-devstack.*): unload and remove so only one rotation runs.
+	if [ -f "$HOME/Library/LaunchAgents/com.local-devstack.logs-prune.plist" ]; then
+		launchctl bootout "gui/$(id -u)/com.local-devstack.logs-prune" > /dev/null 2>&1 || true
+		rm -f "$HOME/Library/LaunchAgents/com.local-devstack.logs-prune.plist"; ok "removed the old com.local-devstack.logs-prune agent"
+	fi
 	tmp="$(mktemp)"
 	cat > "$tmp" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -231,8 +243,8 @@ ensure_log_pruning() {
 	<key>ProgramArguments</key><array><string>/bin/bash</string><string>$REPO_DIR/bin/logs-prune</string></array>
 	<key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
 	<key>RunAtLoad</key><false/>
-	<key>StandardOutPath</key><string>$BREW_PREFIX/var/log/local-devstack-prune.log</string>
-	<key>StandardErrorPath</key><string>$BREW_PREFIX/var/log/local-devstack-prune.log</string>
+	<key>StandardOutPath</key><string>$BREW_PREFIX/var/log/devstack-prune.log</string>
+	<key>StandardErrorPath</key><string>$BREW_PREFIX/var/log/devstack-prune.log</string>
 	<key>EnvironmentVariables</key><dict><key>PATH</key><string>$BREW_PREFIX/bin:$BREW_PREFIX/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>HOME</key><string>$HOME</string></dict>
 </dict></plist>
 PLIST

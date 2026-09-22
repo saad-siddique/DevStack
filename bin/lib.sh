@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for local-devstack bin/ scripts. Source, do not execute.
+# Shared helpers for DevStack bin/ scripts. Source, do not execute.
 set -euo pipefail
 
 # Never let a leftover MAMP PATH entry (old shells, IDE terminals) leak into brew/valet/php resolution.
@@ -7,7 +7,7 @@ PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAM
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITES_DIR="${SITES_DIR:-$HOME/Sites}"
 SITES_TSV="${SITES_TSV:-$REPO_DIR/sites.tsv}"
-LOG_DIR="${LOG_DIR:-$HOME/migration-log}"
+LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/DevStack}"   # command logs; migrate-site also parks its pre-migration dumps here
 VALET_HOME="${VALET_HOME:-$HOME/.config/valet}"
 BREW_PREFIX="${BREW_PREFIX:-$(brew --prefix)}"
 VALET_BIN="${VALET_BIN:-$BREW_PREFIX/bin/valet}"   # the sudoers alias written by `valet trust` matches this path only

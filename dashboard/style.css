@@ -1,4 +1,4 @@
-/* local-devstack dashboard — status first, colour means state. */
+/* DevStack dashboard — status first, colour means state. */
 :root {
 	--bg: #eef1f5; --surface: #ffffff; --ink: #172029; --muted: #5b6b7b; --line: #d7dee6;
 	--accent: #2457c5; --accent-ink: #ffffff; --on: #178a4e; --on-glow: rgba(23, 138, 78, .28);

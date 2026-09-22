@@ -1,4 +1,4 @@
-# CLAUDE.md — local-devstack
+# CLAUDE.md — DevStack
 
 Read `docs/mamp-to-valet-migration-handoff-v2.md` before changing anything; it is the spec and holds the
 live inventory of the 24 MAMP hosts, the decisions (section 10) and the gotchas (section 9).

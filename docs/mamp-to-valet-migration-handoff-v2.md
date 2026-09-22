@@ -1,5 +1,7 @@
 # Handoff v2: MAMP PRO 7.2.8 → Laravel Valet (native Homebrew) — reviewed against the live machine
 
+> **Naming note (2026-09-22):** the tooling repo was renamed from `local-devstack` to **DevStack** after this document was written. Read `local-devstack` below as DevStack; `~/migration-log` is now `~/Library/Logs/DevStack` for new command logs (existing migration dumps stay where they were written).
+
 Reviewed 2026-09-21/22 on the actual MacBook (macOS 27.0 / Darwin 27, Apple Silicon, Homebrew 7.0.6). External facts (Valet, Herd, tap bottles, Mailpit, CA trust) verified against upstream sources on 2026-09-22; see 9.5.
 Everything marked ✅ was verified on this machine today. ⚠️ = verify during the build. ❌ = v1 assumption that was wrong.
 

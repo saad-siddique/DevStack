@@ -216,7 +216,7 @@ struct RemoveSiteView: View {
 						.foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 				}
 			}
-			Toggle("Back up first (files clone + database dump in ~/Backups/local-devstack)", isOn: $form.backupFirst)
+			Toggle("Back up first (files clone + database dump in ~/Backups/DevStack)", isOn: $form.backupFirst)
 				.padding(.leading, 46)
 			HStack {
 				Spacer()

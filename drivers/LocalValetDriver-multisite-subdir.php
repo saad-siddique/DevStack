@@ -2,7 +2,7 @@
 /**
  * Valet driver for a WordPress subdirectory multisite.
  * Mirrors the two rewrite rules WordPress core generates for subdirectory installs.
- * Installed by local-devstack as <site>/LocalValetDriver.php.
+ * Installed by DevStack as <site>/LocalValetDriver.php.
  */
 
 use Valet\Drivers\Specific\WordPressValetDriver;

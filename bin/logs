@@ -26,7 +26,7 @@ log_path() {
 		mysql)   ls -t "$BREW_PREFIX"/var/mysql/*.err 2> /dev/null | head -1 ;;
 		redis)   echo "$BREW_LOG/redis.log" ;;
 		mailpit) echo "$BREW_LOG/mailpit.log" ;;
-		prune)   echo "$BREW_LOG/local-devstack-prune.log" ;;
+		prune)   echo "$BREW_LOG/devstack-prune.log" ;;
 		wp)      local t; t="$(readlink "$VALET_HOME/Sites/$2" 2> /dev/null || true)"; [ -n "$t" ] && echo "$t/wp-content/debug.log" ;;
 	esac
 }

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: UO Local Auto-login (dev only)
  * Description: One-time login links for local .test sites, minted by `devstack login <site>`. The token lives 60 seconds, is stored hashed, works once, and this file does nothing on any other host.
- * Author: local-devstack
+ * Author: DevStack
  */
 
 add_action(

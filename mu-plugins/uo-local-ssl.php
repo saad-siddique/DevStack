@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: UO Local SSL (dev only)
- * Description: Lets WordPress trust the local Valet certificate authority for same-site HTTPS requests. Installed by local-devstack; only active on .test hosts and WP-CLI.
- * Author: local-devstack
+ * Description: Lets WordPress trust the local Valet certificate authority for same-site HTTPS requests. Installed by DevStack; only active on .test hosts and WP-CLI.
+ * Author: DevStack
  */
 
 $uo_local_host = isset( $_SERVER['HTTP_HOST'] ) ? (string) $_SERVER['HTTP_HOST'] : '';

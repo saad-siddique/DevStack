@@ -21,7 +21,7 @@ devstack — native local WordPress stack (Valet, Homebrew PHP 7.4–8.6, MySQL 
 Sites
   devstack new <name> [--php 8.2] [--empty]     fresh WordPress at https://<name>.$TLD (prints the admin password once)
   devstack import <name> <zip|folder> [--php X] LocalWP export, any folder + .sql, or a devstack backup folder
-  devstack backup <name> [--db-only]            ~/Backups/local-devstack/<name>/<stamp>/ (files clone + db.sql.gz)
+  devstack backup <name> [--db-only]            ~/Backups/DevStack/<name>/<stamp>/ (files clone + db.sql.gz)
   devstack backups [name]                       list backups
   devstack remove <name> --yes [--backup]       unlink, unsecure, drop database + user, delete folder
   devstack sites                                every linked site with its PHP version

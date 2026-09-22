@@ -51,6 +51,8 @@ final class AppState: ObservableObject {
 
 	let sampler = UsageSampler()
 	let installed = Devstack.isInstalled
+	/// Snapshot mode: fixture data on screen, never replaced by a real status read.
+	private var frozen = false
 	/// Set by the panel (it owns the SwiftUI openWindow action); jobs started from anywhere use it.
 	var showModalWindow: (() -> Void)?
 	private var loop: Task<Void, Never>?
@@ -104,16 +106,26 @@ final class AppState: ObservableObject {
 	}
 
 	func refresh() async {
-		guard installed, !isRefreshing else { return }
+		guard installed, !isRefreshing, !frozen else { return }
 		isRefreshing = true
 		defer { isRefreshing = false }
 		do {
-			status = try await Devstack.runJSON(StackStatus.self, ["status", "--json"])
+			let fresh = try await Devstack.runJSON(StackStatus.self, ["status", "--json"])
+			if frozen { return }
+			status = fresh
 			lastUpdated = Date()
 			errorMessage = nil
 		} catch {
+			if frozen { return }
 			errorMessage = error.localizedDescription
 		}
+	}
+
+	func freeze(with fixture: StackStatus) {
+		frozen = true
+		status = fixture
+		lastUpdated = Date()
+		errorMessage = nil
 	}
 
 	// MARK: quick actions (a few seconds; the row shows a spinner)

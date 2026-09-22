@@ -1,6 +1,6 @@
 <?php
 /**
- * local-devstack dashboard.
+ * DevStack dashboard.
  *
  * GET  /               HTML shell (app.js fetches the JSON below every 5 s).
  * GET  /?api=status    bin/stack-status + Xdebug state + tool links.
@@ -149,7 +149,7 @@ header( 'Cache-Control: no-store' );
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>local-devstack</title>
+<title>DevStack</title>
 <meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="style.css?v=<?php echo (int) filemtime( __DIR__ . '/style.css' ); ?>">
 </head>
@@ -158,7 +158,7 @@ header( 'Cache-Control: no-store' );
 	<aside class="rail" aria-label="Sections">
 		<div class="brand">
 			<span class="pulse" id="pulse" title="Live" aria-hidden="true"></span>
-			<h1>local-devstack</h1>
+			<h1>DevStack</h1>
 		</div>
 		<nav class="nav" role="tablist" aria-orientation="vertical">
 			<button class="nav-item" role="tab" data-tab="overview" aria-selected="true" aria-controls="tab-overview">Overview<span class="dot" hidden></span></button>

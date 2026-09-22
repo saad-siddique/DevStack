@@ -3,11 +3,11 @@
 # site-backup --list [name] [--json]
 # One backup = a folder that `site-import <newname> <folder>` restores: files/ (an APFS clone of the site folder,
 # instant and space-free on the same volume), db.sql.gz (mysqldump --force, so stale views cannot abort it) and
-# manifest.json. Default root: ~/Backups/local-devstack/<name>/<YYYYMMDD-HHMMSS>/. Read-only on the site, so
+# manifest.json. Default root: ~/Backups/DevStack/<name>/<YYYYMMDD-HHMMSS>/. Read-only on the site, so
 # protected sites are allowed here (it is the safety net site-remove --backup relies on).
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/local-devstack}"
+BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/DevStack}"
 NAME="" ; OUT="$BACKUP_ROOT" ; DB=1 ; FILES=1 ; JSON=0 ; LIST=0
 while [ $# -gt 0 ]; do
 	case "$1" in

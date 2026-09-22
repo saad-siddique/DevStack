@@ -1,4 +1,4 @@
-/* local-devstack dashboard — reads ?api=status every 5 s, sends actions with the X-Devstack header. */
+/* DevStack dashboard — reads ?api=status once a minute while visible, sends actions with the X-Devstack header. */
 (function () {
 	'use strict';
 

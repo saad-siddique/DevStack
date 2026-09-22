@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # mamp-backout : remove MAMP PRO's hooks from the system without deleting /Applications/MAMP or MAMP PRO.app.
-# Idempotent. Needs sudo (hosts file, LaunchDaemon). Everything removed is copied to ~/migration-log/mamp-backout/ first.
+# Idempotent. Needs sudo (hosts file, LaunchDaemon). Everything removed is copied to $LOG_DIR/mamp-backout/ first.
 set -euo pipefail
 
-B="$HOME/migration-log/mamp-backout"; mkdir -p "$B"; STAMP="$(date +%Y%m%d-%H%M%S)"
+B="$LOG_DIR/mamp-backout"; mkdir -p "$B"; STAMP="$(date +%Y%m%d-%H%M%S)"
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()  { printf '\033[1;32m ✓ \033[0m %s\n' "$*"; }
 

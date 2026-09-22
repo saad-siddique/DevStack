@@ -1,65 +1,86 @@
-# local-devstack
+# DevStack
 
-Native (no Docker, no VM) local WordPress dev stack for macOS on Apple Silicon:
-Laravel Valet + Homebrew PHP (8.4 default, 7.4–8.6 available) + `mysql@8.4` + Mailpit + Redis + Memcached + WP-CLI,
-one global `devstack` command for everything, and a small menu-bar app (**DevStack**) that drives the same commands.
+Native local WordPress development for macOS on Apple Silicon. No Docker, no VM, no licence.
+
+Laravel Valet (nginx, dnsmasq, `https://<site>.test`) · Homebrew PHP 7.4 and 8.0–8.6, one version per site ·
+MySQL 8.4 · Mailpit · Redis · Memcached · WP-CLI · phpMyAdmin · one global `devstack` command · a menu-bar app.
 
 ![DevStack menu-bar panel](docs/img/panel.png)
 
-**Status (2026-09-22):** All 24 hosts on Valet; MAMP PRO stopped and backed out of the system (apps kept for now).
-PHP 7.4 and every 8.x (8.0–8.6) are installed, each with redis, imagick, memcached and Xdebug (off) extensions;
-php-fpm runs only for versions a site uses (8.4 default, 7.4 for three sites). Redis and Memcached run as brew services.
-Phase 5 tooling built: `site-new`, `site-import` (LocalWP exports), `site-remove`, `php-xdebug`, `service`, phpMyAdmin
-at `https://phpmyadmin.test` (auto-login as root), and a dashboard at `https://dashboard.test` that shows services,
-sites and PHP versions and can start/stop services and toggle Xdebug. Every command is reachable from anywhere as
-`devstack <verb>`; `site-backup` (APFS clone + gzip dump, restorable through `site-import`) and the `app/` menu-bar
-app (new/import/backup/remove sites, service and Xdebug toggles, live stack load) are built and installed.
+## What you get
 
-Plan and inventory: `docs/mamp-to-valet-migration-handoff-v2.md` (section 0 summary, 6 phases, 10 decisions).
-Execution log of the pilot: `docs/superpowers/plans/2026-09-22-phase1-3-pilot.md`.
+| | |
+|---|---|
+| Sites | `~/Sites/<name>` served at `https://<name>.test` with a certificate your browsers trust |
+| PHP | 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (default), 8.5, 8.6, each with redis, imagick, memcached and Xdebug (off, trigger mode); per-site version |
+| Database | MySQL 8.4 on `127.0.0.1:3306`, root without a password (local only); one `wp_<name>` database and one user per site; phpMyAdmin at `https://phpmyadmin.test`, signed in |
+| Mail | Every site's outgoing mail lands in Mailpit at `http://localhost:8025` (SMTP 1025); nothing leaves the machine |
+| Caching | Redis on 6379 and Memcached on 11211 running, PHP extensions loaded; opt in per site with a drop-in plugin |
+| Tools | `devstack` command with zsh completion, dashboard at `https://dashboard.test`, DevStack.app in the menu bar |
+| Logs | nginx, PHP, MySQL, Redis, Mailpit and each site's `debug.log`, rotated daily, nothing older than 48 hours |
 
-## Layout (target — see handoff section 11)
+## Requirements
 
-```
-Brewfile              php 7.4–8.6 (+ redis/imagick/memcached/xdebug per version), mysql@8.4, mailpit, redis, memcached, wp-cli, composer
-bootstrap.sh          idempotent; the only thing a teammate must run (`--app` also builds and installs the menu-bar app)
-php/                  zz-uo-dev.ini drop-in, copied into each /opt/homebrew/etc/php/<v>/conf.d/
-drivers/              LocalValetDriver for the subdirectory multisite (wpmu)
-mu-plugins/           uo-local-ssl.php (https_ssl_verify → false, local only)
-dashboard/            dashboard.test (PHP + a little JS): services, PHP, logs, tools
-bin/                  THE CONTRACT — every command supports --json where output is consumed by tooling
-                      devstack (global dispatcher)  site-new  site-import  site-backup  site-remove  php-xdebug
-                      service  stack-status  logs  logs-prune  migrate-site  migrate-all  mamp-backout  app
-completions/          zsh completion for devstack (linked into $(brew --prefix)/share/zsh/site-functions)
-app/                  DevStack.app: SwiftUI MenuBarExtra + Swift Charts, macOS 14+, Swift Package; only ever runs `devstack …`
-docs/                 the handoff/plan, execution logs (docs/superpowers/plans), screenshots (docs/img)
-```
+- An Apple Silicon Mac on macOS 14 or newer. Paths assume `/opt/homebrew`; Intel Macs are not supported.
+- [Homebrew](https://brew.sh).
+- Xcode Command Line Tools (`xcode-select --install`) or Xcode. Either one builds the app.
+- An administrator account. `bootstrap.sh` asks for your password twice: once so Valet can install its `.test` DNS
+  resolver, once for `valet trust`, which lets `brew services` and `valet` run without a password afterwards.
+- Ports 80, 443, 3306, 1025, 8025, 6379 and 11211 free. Quit MAMP, stop LocalWP's router (or switch it to
+  "localhost" mode in LocalWP's preferences), and stop any other Homebrew nginx or MySQL before you start.
 
-## Ground rules
-
-- No Docker for WordPress. Homebrew formulae and native binaries only.
-- `bootstrap.sh` never depends on `app/`. The app never talks to brew/valet/mysql directly; it calls `bin/*`.
-- `uncanny-automator` is a **protected site**: never in a batch, never first, only with a verified fresh backup
-  and an explicit flag. See handoff section 6.1.
-- `automator-platform` (Docker-only Laravel) is out of scope and must not be served by Valet.
-- Scripts are idempotent: re-running on a migrated site is a no-op.
-
-## Quick start
+## Install
 
 ```bash
-git clone git@github.com:saad-siddique/local-devstack.git ~/Work/local-devstack
-cd ~/Work/local-devstack && ./bootstrap.sh --app  # asks for sudo twice on a fresh Mac (valet install, valet trust);
-                                                  # --app also builds DevStack.app into /Applications and starts it
-devstack help                                     # from now on, from any directory
-devstack migrate cleantest --json                 # one MAMP site: link → isolate → secure → DB copy → DB_HOST → URLs → smoke
-devstack migrate-all                              # everything in sites.tsv except protected sites
-devstack mamp-backout                             # after MAMP PRO is stopped: hosts entries, helper daemon, shell hooks
+git clone git@github.com:saad-siddique/DevStack.git ~/Work/DevStack
+cd ~/Work/DevStack
+./bootstrap.sh --app
 ```
 
-## The `devstack` command
+`bootstrap.sh` is idempotent. Run it again after every `git pull`; it only changes what differs. A fresh Mac takes
+10–20 minutes, mostly downloading PHP versions. In order, it:
 
-`bootstrap.sh` links `bin/devstack` to `/opt/homebrew/bin/devstack` (and its zsh completion), so nobody has to
-`cd` into the repo. Verbs map to `bin/` scripts; any `bin/` name also works (`devstack site-new …`).
+1. Taps `shivammathur/php` and `shivammathur/extensions`, then runs `brew bundle` on the `Brewfile`: PHP 7.4–8.6,
+   mysql@8.4, mailpit, redis, memcached, composer, wp-cli, and redis/imagick/memcached/xdebug for every PHP version.
+2. Links `php@8.4` as the command-line `php`, copies `php/zz-uo-dev.ini` into every `/opt/homebrew/etc/php/<v>/conf.d/`
+   (512 MB memory, 1 GB uploads, `display_errors` on, `sendmail_path` → Mailpit, Xdebug trigger mode on port 9003)
+   and switches Xdebug off by default.
+3. Installs Laravel Valet through Composer, runs `valet install` (nginx, dnsmasq, `/etc/resolver/test`) and
+   `valet trust`. Patches Valet's nginx stubs to listen on `[::1]` too and to accept `php@8.6`.
+4. Starts mysql@8.4, mailpit, redis and memcached as `brew services`, so they come back after a reboot.
+5. Links and secures `dashboard.test`; downloads phpMyAdmin into `~/.local/share/devstack/phpmyadmin` and serves it
+   as `phpmyadmin.test`.
+6. Installs a user LaunchAgent, `com.devstack.logs-prune`, that rotates logs daily at 04:00.
+7. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`.
+8. With `--app`: builds `DevStack.app`, installs it into `/Applications` and starts it.
+
+Open a new terminal so `devstack` and `valet` are on your PATH, then:
+
+```bash
+devstack status | jq .        # every service should say "started"
+devstack new hello            # your first site: https://hello.test, wp-admin admin / admin1
+devstack login hello          # opens wp-admin already signed in
+```
+
+## Where things live
+
+| | |
+|---|---|
+| Site files | `~/Sites/<name>` (`SITES_DIR=…` in your shell to use another folder) |
+| Valet state | `~/.config/valet`: `Sites/` links, `Nginx/` per-site confs, `Certificates/`, `Log/` |
+| Databases | `/opt/homebrew/var/mysql`; per site one `wp_<name>` schema and a `wp_<name>` user, `DB_HOST 127.0.0.1` |
+| PHP settings | `/opt/homebrew/etc/php/<v>/php.ini` is never edited; overrides live in `conf.d/zz-uo-dev.ini` |
+| Per-site PHP version | `.valetrc` in the site folder (`php=php@7.4`), applied with `valet isolate` |
+| Backups | `~/Backups/DevStack/<site>/<stamp>/` (`BACKUP_ROOT=…` to move them) |
+| Logs | `~/.config/valet/Log/` (nginx, PHP), `/opt/homebrew/var/log/` (php-fpm, redis, mailpit, rotation), `/opt/homebrew/var/mysql/*.err`, `<site>/wp-content/debug.log`; each `devstack` command appends to `~/Library/Logs/DevStack/<command>-<site>.log` |
+| phpMyAdmin | `~/.local/share/devstack/phpmyadmin` |
+| The app | `/Applications/DevStack.app`, built from `app/` |
+| This repo | wherever you cloned it; `devstack path` prints it |
+
+## Everyday commands
+
+`devstack` works from any directory. Verbs map to the scripts in `bin/`; any script name also works
+(`devstack site-new …`). Every command takes `--json` where a tool consumes the output.
 
 ```bash
 devstack new myplugin --php 8.2                  # fresh WordPress at https://myplugin.test; wp-admin admin / admin1 unless
@@ -67,43 +88,90 @@ devstack new myplugin --php 8.2                  # fresh WordPress at https://my
                                                  # --php accepts 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (default), 8.5, 8.6
 devstack login myplugin                          # opens wp-admin already signed in (one-time link, 60 s, first admin)
 devstack import client ~/Downloads/client.zip    # LocalWP export, any zip/folder with a WordPress root + .sql, or a backup folder
-devstack backup myplugin                         # ~/Backups/local-devstack/myplugin/<stamp>/ — see Backups below
-devstack backups                                 # list them (newest first)
-devstack remove myplugin --yes --backup          # back up, then unlink, unsecure, drop DB + user, delete folder
+devstack backup myplugin                         # ~/Backups/DevStack/myplugin/<stamp>/ — see Backups
+devstack backups                                 # list them, newest first
+devstack remove myplugin --yes --backup          # back up, then unlink, unsecure, drop database + user, delete the folder
 devstack sites                                   # linked sites with PHP version and protection flag
 devstack open myplugin | dashboard | phpmyadmin | mailpit
-devstack xdebug on --php 8.4                     # trigger mode, port 9003; use a browser Xdebug helper or XDEBUG_TRIGGER=1
+devstack xdebug on --php 8.4                     # trigger mode, port 9003; XDEBUG_TRIGGER=1 or a browser helper starts a session
 devstack service mailpit restart                 # nginx dnsmasq mysql@8.4 mailpit redis memcached php@<any installed>
 devstack status | jq .                           # what the dashboard and the app read
 devstack logs list                               # every stack log with size: nginx php php-fpm mysql redis mailpit, wp <site>
 devstack logs php -n 100                         # tail one; `devstack logs crashes` lists macOS crash reports for stack processes
 devstack logs-prune                              # rotate now (the LaunchAgent does this daily at 04:00)
 devstack update                                  # git pull + bootstrap
-devstack app install | open | snapshot | status  # the menu-bar app (below)
+devstack app install | open | snapshot | status  # the menu-bar app
 ```
+
+## Bringing your existing sites
+
+**From LocalWP.** In LocalWP, right-click the site and choose *Export* (keep everything selected). Then:
+
+```bash
+devstack import client ~/Downloads/client.zip --php 8.2
+```
+
+Import unpacks the zip, finds the WordPress root and the largest `.sql`, copies the files to `~/Sites/client`,
+creates `wp_client` and its user, imports the dump, points wp-config at the new database, drops hard-coded
+`WP_HOME`/`WP_SITEURL` constants, rewrites every old URL (`client.local`, http and https, serialized data included)
+to `https://client.test`, links and secures the site and smoke-tests it. Users and passwords in the database are
+untouched, so your LocalWP credentials still work, and so does `devstack login client`.
+
+**From any host, or a folder plus a dump.** `devstack import name /path/to/wordpress --sql dump.sql` (`.sql.gz` works).
+
+**From another DevStack machine.** `devstack backup site` there, copy the stamped folder over, `devstack import site
+<folder>` here. The manifest carries the PHP version.
+
+**From MAMP or MAMP PRO on the same machine.** Fill `sites.tsv` (host, folder, PHP, MAMP database, protected flag)
+and run `devstack migrate <host>` per site or `devstack migrate-all`. Each site's database is copied out of MAMP's
+MySQL on port 8889 into MySQL 8.4 and its URLs rewritten; MAMP's copy is never touched, so the rollback is "start
+MAMP". `devstack mamp-backout` removes MAMP's hosts entries, helper daemon and shell hooks once you are done. The
+`sites.tsv` in this repo is the author's inventory; replace it with yours. The full runbook is
+`docs/mamp-to-valet-migration-handoff-v2.md`.
+
+**Not WordPress.** `devstack new tool --empty` links an empty folder with a placeholder `index.php`. For anything
+already on disk: `cd ~/Sites/<folder> && valet link && valet secure`. Valet serves Laravel, plain PHP and static
+sites with its built-in drivers.
+
+## PHP versions, WP-CLI and Xdebug
+
+- Sites without a `.valetrc` run the default, PHP 8.4. `--php` on `new`/`import` isolates a site; for an existing one:
+  `printf 'php=php@7.4\n' > ~/Sites/site/.valetrc && valet isolate php@7.4 --site=site`.
+- php-fpm runs only for the default version and for versions some site isolates. Stop an idle one with
+  `devstack service php@8.2 stop` or the switch on the app's PHP tab.
+- `wp` on your PATH is WP-CLI under PHP 8.4. Inside an isolated site use Valet's proxy so it matches the site's
+  version: `valet php /opt/homebrew/bin/wp plugin list`. (`valet composer` does the same for Composer.)
+- Xdebug is installed for every version and off by default because it costs speed. `devstack xdebug on --php 8.4`
+  turns it on in trigger mode (port 9003, restarts that php-fpm); start a session with the `XDEBUG_TRIGGER=1` cookie,
+  a browser helper extension, or `XDEBUG_TRIGGER=1 wp …`. No path mappings are needed, everything is local.
+
+## Protected sites
+
+Mark a site `protected=yes` in `sites.tsv` and the tooling will not remove it (`devstack remove` and the app refuse),
+will not batch-migrate it, and will only migrate it with an explicit backup flag. Backups are still allowed; they are
+read-only on the site.
 
 ## One-click login
 
-`devstack login <site>` (and the key icon / "Log in to wp-admin" in the app) mints a 48-hex one-time token, stores its
-SHA-256 as a 60-second transient through WP-CLI, and opens `https://<site>.test/?uo_login=<token>`. The
-`uo-local-autologin.php` mu-plugin (installed into every site by `site-new`, `site-import`, `migrate-site` and on first
-`login`) checks the host ends in `.test`, deletes the transient, compares hashes with `hash_equals`, sets the auth
-cookie and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account;
-the default is the first administrator (first super admin on multisite).
+`devstack login <site>` (and the key icon or "Log in to wp-admin" in the app) mints a 48-hex one-time token, stores
+its SHA-256 as a 60-second transient through WP-CLI, and opens `https://<site>.test/?uo_login=<token>`. The
+`uo-local-autologin.php` mu-plugin, installed into every site by `new`, `import`, `migrate` and on first `login`,
+checks that the host ends in `.test`, deletes the transient, compares hashes with `hash_equals`, sets the auth cookie
+and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account; the default is
+the first administrator (the first super admin on multisite).
 
 ## Backups
 
-`devstack backup <site>` writes `~/Backups/local-devstack/<site>/<YYYYMMDD-HHMMSS>/` holding `files/` (an APFS clone
-of the site folder: instant and space-free until either side changes), `db.sql.gz` (`mysqldump --force`, so a stale
-view cannot abort it) and `manifest.json` (name, PHP version, database, table count). A 260 MB site backs up in
-under three seconds. Restore or clone it with `devstack import <newname> <backup folder>`; the manifest supplies the
-PHP version and every old URL is rewritten to the new name. Backups are allowed on protected sites (read-only), and
-`devstack remove --backup` refuses to delete anything when the backup fails. Nothing prunes backups for you.
+`devstack backup <site>` writes `~/Backups/DevStack/<site>/<YYYYMMDD-HHMMSS>/` holding `files/` (an APFS clone of the
+site folder: instant, and space-free until either side changes), `db.sql.gz` (`mysqldump --force`, so a stale view
+cannot abort it) and `manifest.json` (name, PHP version, database, table count). A 260 MB site backs up in under
+three seconds. Restore or clone it with `devstack import <newname> <backup folder>`; every old URL is rewritten to the
+new name. `devstack remove --backup` refuses to delete anything when the backup fails. Nothing prunes backups for you.
 
 ## Menu-bar app (DevStack.app)
 
-A SwiftUI `MenuBarExtra` (macOS 14+) that only ever runs `devstack …` and reads its `--json` output: the app has
-no brew, valet or MySQL knowledge of its own, so when a script changes the app does not.
+A SwiftUI `MenuBarExtra` (macOS 14+) that only ever runs `devstack …` and reads its `--json` output. The app has no
+brew, valet or MySQL knowledge of its own, so when a script changes the app does not.
 
 - Panel: stack summary, quick-open buttons (Dashboard, phpMyAdmin, Mailpit with unread count), a three-minute
   CPU/memory chart of the stack's own processes, then Sites (open, log in to wp-admin, folder, back up, remove),
@@ -115,33 +183,67 @@ no brew, valet or MySQL knowledge of its own, so when a script changes the app d
 - Cadence is lean: one `devstack status` per minute while the panel is open, one per five minutes while closed (for
   the icon), CPU samples only while the panel is open. The icon changes when a core service is down or launchd
   reports an error.
-- Build and install: `devstack app install` (Swift Package Manager; Xcode *or* the Command Line Tools; ad-hoc
-  signed, and locally built apps carry no quarantine flag). `devstack app snapshot` renders every window to
-  `docs/img/*.png` without clicking through the menu bar. Once a Developer ID exists:
-  `devstack app install --sign "Developer ID Application: …"` (or `DEVSTACK_SIGN_IDENTITY`).
-- "Start at login" lives in the ⋯ menu (`SMAppService`).
+- `devstack app install` builds with Swift Package Manager (Xcode or the Command Line Tools), signs ad hoc (locally
+  built apps carry no quarantine flag) and installs to `/Applications`. With a Developer ID:
+  `devstack app install --sign "Developer ID Application: …"` or `DEVSTACK_SIGN_IDENTITY`.
+- `devstack app snapshot` renders every window to `docs/img/*.png` with made-up site names, without touching the menu bar.
+- "Start at login" is in the ⋯ menu.
 
 ## Logs and retention
 
-- nginx and PHP errors land in `~/.config/valet/Log/`, the php-fpm master log, Redis and Mailpit in
-  `/opt/homebrew/var/log/`, MySQL in `/opt/homebrew/var/mysql/*.err`, each WordPress site in its `wp-content/debug.log`.
-- The dashboard is a left-rail app: Overview (service lamps + sites), PHP, Services, Logs, Tools. It reloads once a
-  minute while visible, never while hidden, and has a Refresh button; actions refresh immediately. Keeping it lean
-  leaves the CPU to the sites.
-- The dashboard's **Logs** tab tails any of them with severity colouring, a filter, and a Clear button. The
-  masthead turns red when launchd reports a service in error or macOS wrote a crash report for php-fpm, nginx, mysqld,
-  redis, memcached, mailpit or dnsmasq in the last 24 hours — the failures WordPress itself cannot report.
-- Retention: a user LaunchAgent (`com.local-devstack.logs-prune`) runs `bin/logs-prune` daily at 04:00. Each log is
-  copied to `.1` and truncated in place, so writers keep appending; `.1` files older than 48 hours are deleted and any
-  live log over 100 MB is rotated immediately. Nothing older than two days survives.
+- nginx and PHP errors land in `~/.config/valet/Log/`; the php-fpm master log, Redis and Mailpit in
+  `/opt/homebrew/var/log/`; MySQL in `/opt/homebrew/var/mysql/*.err`; each WordPress site in its `wp-content/debug.log`.
+- The dashboard (`https://dashboard.test`) has Overview, PHP, Services, Logs and Tools tabs. It reloads once a minute
+  while visible, never while hidden, and has a Refresh button. Its Logs tab tails any log with severity colouring and a
+  filter, and the masthead turns red when launchd reports a service in error or macOS wrote a crash report for a stack
+  process in the last 24 hours: the failures WordPress itself cannot report.
+- Retention: the `com.devstack.logs-prune` LaunchAgent runs `bin/logs-prune` daily at 04:00. Each log is copied to
+  `.1` and truncated in place, so writers keep appending; `.1` files older than 48 hours are deleted and any live log
+  over 100 MB is rotated at once.
+- Dashboard writes (start/stop, Xdebug) are POST requests that require the `X-Devstack: 1` header and only call the
+  `bin/` commands with allow-listed arguments, so another website open in your browser cannot trigger them.
 
-Dashboard writes (start/stop, Xdebug) are POST requests that require the `X-Devstack: 1` header and only ever call the
-`bin/` commands above with allow-listed arguments, so another website open in your browser cannot trigger them.
+## Updating and uninstalling
 
-`bootstrap.sh` is idempotent and safe to re-run. After `valet trust` it is fully non-interactive, so agents and
-scripts can run it too.
+```bash
+devstack update                 # git pull --ff-only, then bootstrap.sh
+devstack app install            # rebuild the app after app/ changed
+```
 
-## Things learned the hard way (see handoff section 9 for the rest)
+To remove DevStack (sites in `~/Sites` and databases under `/opt/homebrew/var/mysql` stay until you delete them):
+
+```bash
+devstack app uninstall
+launchctl bootout gui/$(id -u)/com.devstack.logs-prune; rm ~/Library/LaunchAgents/com.devstack.logs-prune.plist
+valet uninstall --force         # nginx, dnsmasq, /etc/resolver/test, certificates
+brew services stop mysql@8.4 mailpit redis memcached
+rm /opt/homebrew/bin/devstack /opt/homebrew/share/zsh/site-functions/_devstack
+```
+
+## Repo layout and ground rules
+
+```
+Brewfile              php 7.4–8.6 (+ redis/imagick/memcached/xdebug per version), mysql@8.4, mailpit, redis, memcached, wp-cli, composer
+bootstrap.sh          idempotent; the only thing anyone must run (`--app` also builds and installs the menu-bar app)
+php/                  zz-uo-dev.ini drop-in, copied into each /opt/homebrew/etc/php/<v>/conf.d/
+drivers/              LocalValetDriver for subdirectory multisites
+mu-plugins/           uo-local-ssl.php (trust the local CA), uo-local-autologin.php (one-time login); .test hosts only
+dashboard/            dashboard.test (PHP + a little JS)
+bin/                  THE CONTRACT — devstack (dispatcher)  site-new  site-import  site-backup  site-login  site-remove
+                      php-xdebug  service  stack-status  logs  logs-prune  migrate-site  migrate-all  mamp-backout  app
+completions/          zsh completion for devstack
+app/                  DevStack.app: SwiftUI MenuBarExtra + Swift Charts, Swift Package; only ever runs `devstack …`
+sites.tsv             MAMP migration inventory (host, folder, php, db, protected, notes) — yours, not ours
+docs/                 the MAMP-to-Valet handoff, build records (docs/superpowers/plans), screenshots (docs/img)
+```
+
+- No Docker for WordPress. Homebrew formulae and native binaries only.
+- `bootstrap.sh` never depends on `app/`. The app never talks to brew, valet or MySQL directly; it calls `devstack`.
+- Scripts are idempotent: re-running one on an existing site is a no-op.
+- Nothing edits `php.ini` in place; PHP settings go in `php/zz-uo-dev.ini`.
+- Valet's machine-local state (`~/.config/valet`) and SQL dumps are never committed.
+
+## Things learned the hard way
 
 - `brew bundle` un-links keg-only `php@8.4`; the Brewfile pins `link: true` and bootstrap re-links before Valet runs.
 - Valet's `valet` wrapper re-execs itself through `sudo`; the sudoers alias from `valet trust` matches
@@ -149,28 +251,23 @@ scripts can run it too.
   `bin/lib.sh` goes through `sudo -n` directly once trust exists.
 - Valet 4.12.0 answers `.test` with `::1` but its nginx stubs only listen on `127.0.0.1`; bootstrap patches the stubs
   and the generated confs (`listen [::1]:…`) so Safari does not 404.
-- Mail from Valet sites reaches whatever listens on :1025. While MAMP's MailHog runs, that is MailHog (UI under
-  `http://localhost:8025/mailhog/`). After disabling MailHog in MAMP PRO, run `brew services start mailpit` (or
-  re-run `bootstrap.sh`); the sites need no change because `sendmail_path` already points at `mailpit sendmail`.
+- Mail from Valet sites reaches whatever listens on :1025. If MailHog (MAMP) still runs there, stop it and
+  `brew services start mailpit`; the sites need no change because `sendmail_path` already points at `mailpit sendmail`.
 - Right after `valet secure`/`isolate`, nginx and php-fpm restart; a smoke test fired immediately sees 502/503.
   `wait_for_site` in `bin/lib.sh` polls first.
-- `WP_HOME`/`WP_SITEURL` constants in wp-config override the database; `migrate-site` rewrites them when they
-  point at the MAMP host. `display_errors=On` sends CLI warnings to stdout, so WP-CLI is run with
-  `-d display_errors=stderr` whenever its output is captured.
-- `wp search-replace` skips `guid` on purpose; a handful of `https://<host>:8890` GUIDs remain and that is fine.
-- A stale `VIEW` whose base table is gone makes `mysqldump` abort. The dump runs with `--force`, the import compares
-  base tables only and reports missing views; Automator rebuilds its `*_uap_*_logs_view` via
-  `wp eval 'Automator_DB::create_views();'`.
-- Several sites move wp-login.php (`/login/`, `/frontend-login/`); the login-form smoke check is informational only.
-- View `DEFINER`s must exist before `CREATE VIEW` runs on import: `migrate-site` creates the site's DB user first, and
-  any extra definer (e.g. the Codeception DB user) must be created by hand beforehand.
-- MAMP's vhost serves the *same* folder, so after migration it too reads the new database through the rewritten
-  wp-config. Rollback for a site is: restore its wp-config.php from `~/migration-log/*-files-pre.tgz`; MAMP's database
-  copy was never touched.
-- MAMP PRO rewrites `~/.profile` (PATH + `php`/`mysql`/`python` aliases) every time it runs, even on quit. `bin/mamp-backout`
-  strips it and appends a guard to `~/.zshrc` that un-aliases and de-paths anything MAMP re-adds.
-- WordPress and WP-CLI look one directory *above* a site for wp-config.php. A stray `~/Sites/wp-config.php` broke
-  `wp config create` for every new site; it now lives in `~/migration-log/stray/`. Keep `~/Sites` free of loose WP files.
+- `WP_HOME`/`WP_SITEURL` constants in wp-config override the database; import and migrate rewrite or drop them.
+  `display_errors=On` sends CLI warnings to stdout, so WP-CLI runs with `-d display_errors=stderr` whenever its
+  output is captured.
+- `wp search-replace` skips `guid` on purpose; a handful of old GUIDs remain and that is fine.
+- A stale `VIEW` whose base table is gone makes `mysqldump` abort. Dumps run with `--force`, imports compare base
+  tables only and report missing views.
+- View `DEFINER`s must exist before `CREATE VIEW` runs on import: the site's DB user is created first, and any extra
+  definer (e.g. a test-suite DB user) must be created by hand beforehand.
+- Some sites move wp-login.php (`/login/`, `/frontend-login/`); the login-form smoke check is informational only.
+- MAMP PRO rewrites `~/.profile` (PATH plus `php`/`mysql`/`python` aliases) every time it runs, even on quit.
+  `bin/mamp-backout` strips it and appends a guard to `~/.zshrc` that un-aliases and de-paths anything MAMP re-adds.
+- WordPress and WP-CLI look one directory *above* a site for wp-config.php. A stray `~/Sites/wp-config.php` breaks
+  `wp config create` for every new site. Keep `~/Sites` free of loose WordPress files.
 - Under `set -o pipefail`, `tr … < /dev/urandom | head -c N` kills the script with SIGPIPE. `random_secret` reads a
   fixed chunk first.
 - Xdebug from `shivammathur/extensions` ships as `conf.d/20-xdebug.ini`; off = renamed to `.off`. Bootstrap turns it off
@@ -179,10 +276,9 @@ scripts can run it too.
   in `bin/lib.sh` and `bin/service` map the alias; the Brewfile pins `link: false` so it never steals the `php` symlink.
 - Valet 4.12.0 knows PHP versions up to 8.5. Bootstrap appends newer tap builds (8.6) to its `SUPPORTED_PHP_VERSIONS`
   so `valet isolate php@8.6` works; re-applied after every `composer global update`.
-- The Redis *cask* cannot be managed by `brew services`; it was replaced by the `redis` formula. A pre-existing
-  `redis.conf` had `daemonize yes`, which makes launchd think the service died. Bootstrap does not touch redis.conf;
-  keep `daemonize no`. Docker's automator-platform Redis binds `*:6379` while Homebrew's binds `127.0.0.1:6379`; both
-  coexist, and `127.0.0.1` reaches Homebrew's.
+- The Redis *cask* cannot be managed by `brew services`; use the `redis` formula. A `redis.conf` with `daemonize yes`
+  makes launchd think the service died; keep `daemonize no`. A Docker Redis bound to `*:6379` coexists with
+  Homebrew's on `127.0.0.1:6379`, and `127.0.0.1` reaches Homebrew's.
 - "Class not found" fatals after switching plugin branches are a stale Composer classmap: `composer dump-autoload`
   in the plugin repo, not a stack problem.
 - The 2026 macOS SDK implements SwiftUI's `@State` as a macro whose plugin ships only with Xcode; the Command Line
@@ -192,4 +288,4 @@ scripts can run it too.
 - `devstack app snapshot` orders its windows front without activating the app: an early version activated itself and
   swallowed a keystroke meant for another app. Never call `activate(ignoringOtherApps:)` from unattended code.
 - A GUI app starts with a bare environment. `bin/devstack` puts `/opt/homebrew/bin` first on `PATH`, and the sudoers
-  rules from `valet trust` cover any process of the user, so `valet`/`brew services` work from the app without a TTY.
+  rules from `valet trust` cover any process of the user, so `valet` and `brew services` work from the app without a TTY.

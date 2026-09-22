@@ -27,7 +27,7 @@ enum Devstack {
 		case failed(String)
 		var errorDescription: String? {
 			switch self {
-			case .notInstalled: return "devstack is not installed. Run bootstrap.sh in the local-devstack repo."
+			case .notInstalled: return "devstack is not installed. Run bootstrap.sh in the DevStack repo."
 			case .failed(let m): return m
 			}
 		}
