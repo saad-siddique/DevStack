@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# mamp-backout : remove MAMP PRO's hooks from the system without deleting /Applications/MAMP or MAMP PRO.app.
+# Idempotent. Needs sudo (hosts file, LaunchDaemon). Everything removed is copied to ~/migration-log/mamp-backout/ first.
+set -euo pipefail
+
+B="$HOME/migration-log/mamp-backout"; mkdir -p "$B"; STAMP="$(date +%Y%m%d-%H%M%S)"
+log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+ok()  { printf '\033[1;32m ✓ \033[0m %s\n' "$*"; }
+
+log "1/4 /etc/hosts"
+if /usr/bin/grep -qE "MAMP PRO|^## Local - Start ##$" /etc/hosts; then
+	sudo cp /etc/hosts "$B/hosts.$STAMP"
+	sudo sed -i '' -e '/# MAMP PRO - Do NOT remove this entry!/d' -e '/^## Local - Start ##$/,/^## Local - End ##$/d' /etc/hosts
+	sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder 2> /dev/null || true
+	ok "removed MAMP PRO entries (backup: $B/hosts.$STAMP)"
+else
+	ok "already clean"
+fi
+
+log "2/4 MAMP PRO privileged helper (LaunchDaemon)"
+PLIST=/Library/LaunchDaemons/de.appsolute.mampprohelper.plist
+HELPER=/Library/PrivilegedHelperTools/de.appsolute.mampprohelper
+if [ -f "$PLIST" ] || [ -f "$HELPER" ] || pgrep -q -f mampprohelper; then
+	sudo launchctl bootout system/de.appsolute.mampprohelper 2> /dev/null || true
+	sudo pkill -f mampprohelper 2> /dev/null || true
+	[ -f "$PLIST" ]  && { sudo cp "$PLIST" "$B/";  sudo rm "$PLIST"; }
+	[ -f "$HELPER" ] && { sudo cp "$HELPER" "$B/"; sudo rm "$HELPER"; }
+	sudo chown -R "$USER" "$B"
+	ok "helper unloaded and removed (copies in $B)"
+else
+	ok "already gone"
+fi
+
+log "3/4 shell profiles"
+# MAMP PRO rewrites ~/.profile (PATH + aliases) every time it runs. Strip it, and keep a copy.
+if /usr/bin/grep -q '/Applications/MAMP' "$HOME/.profile" 2> /dev/null; then
+	cp "$HOME/.profile" "$B/profile.$STAMP"
+	/usr/bin/grep -v '/Applications/MAMP' "$HOME/.profile" > "$HOME/.profile.tmp" && mv "$HOME/.profile.tmp" "$HOME/.profile"
+	/usr/bin/grep -q '.docker/bin' "$HOME/.profile" || printf 'export PATH="$PATH:%s/.docker/bin"\n' "$HOME" >> "$HOME/.profile"
+	ok "~/.profile cleaned (backup: $B/profile.$STAMP)"
+else
+	ok "~/.profile clean"
+fi
+# Any MAMP segment left in a PATH line of the other rc files (token lines etc. are never touched: only lines mentioning MAMP).
+for f in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.zshenv" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+	[ -f "$f" ] || continue
+	if /usr/bin/grep -q '/Applications/MAMP' "$f"; then
+		cp "$f" "$B/$(basename "$f").$STAMP"
+		sed -i '' -E '/\/Applications\/MAMP/ s#:?/Applications/MAMP/[^:"]*##g' "$f"
+		ok "$f: MAMP PATH segments removed (backup in $B)"
+	fi
+done
+# Guard: if MAMP PRO is ever launched again and re-adds its block, neutralise it at the end of the zsh startup.
+GUARD='# local-devstack: neutralise anything MAMP PRO re-adds to ~/.profile'
+if ! /usr/bin/grep -qF "$GUARD" "$HOME/.zshrc" 2> /dev/null; then
+	cat >> "$HOME/.zshrc" <<'ZSH'
+
+# local-devstack: neutralise anything MAMP PRO re-adds to ~/.profile
+unalias php php-config phpdbg phpize pear peardev pecl python python3 pip pip3 wheel virtualenv mysql mysqladmin mysqldump mysqlimport mysqlcheck mysqlsh 2> /dev/null
+export PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAMP' | paste -sd: -)"
+ZSH
+	ok "guard appended to ~/.zshrc"
+else
+	ok "guard already in ~/.zshrc"
+fi
+
+log "4/4 verify"
+printf '  hosts MAMP lines: %s\n' "$(/usr/bin/grep -cE 'MAMP PRO|## Local - Start' /etc/hosts || true)"
+printf '  helper running:   %s\n' "$(pgrep -f mampprohelper > /dev/null && echo yes || echo no)"
+printf '  plist present:    %s\n' "$([ -f "$PLIST" ] && echo yes || echo no)"
+printf '  login-shell PATH has MAMP: %s\n' "$(zsh -lc 'echo $PATH' | tr ':' '\n' | /usr/bin/grep -c '^/Applications/MAMP' || true)"
+printf '  php alias in login shell:  %s\n' "$(zsh -lic 'alias php' 2> /dev/null || echo none)"
+printf '  which php/mysql/wp: %s\n' "$(zsh -lc 'which php mysql wp' | paste -sd' ' -)"
+printf '  .test still resolves: %s\n' "$(dig +short dashboard.test @127.0.0.1 | head -1)"
