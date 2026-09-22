@@ -200,7 +200,8 @@
 		var tbody = $( 'sites' ).querySelector( 'tbody' );
 		tbody.textContent = '';
 		var q = filterText.trim().toLowerCase();
-		var rows = s.sites.filter( function ( site ) { return ! q || -1 !== site.name.indexOf( q ); } );
+		// The app hides its own tooling sites too; keep both lists identical.
+		var rows = s.sites.filter( function ( site ) { return 'dashboard' !== site.name && 'phpmyadmin' !== site.name && ( ! q || -1 !== site.name.indexOf( q ) ); } );
 		rows = rows.slice().sort( function ( a, b ) {
 			if ( !! a.favorite !== !! b.favorite ) { return a.favorite ? -1 : 1; }          // favourites always first
 			if ( sortBySize ) { return ( ( b.files_bytes || 0 ) + ( b.db_bytes || 0 ) ) - ( ( a.files_bytes || 0 ) + ( a.db_bytes || 0 ) ); }
@@ -265,7 +266,8 @@
 				actions
 			] ) );
 		} );
-		$( 'sites-count' ).textContent = rows.length === s.sites.length ? String( s.sites.length ) : rows.length + ' of ' + s.sites.length;
+		var total = s.sites.filter( function ( site ) { return 'dashboard' !== site.name && 'phpmyadmin' !== site.name; } ).length;
+		$( 'sites-count' ).textContent = rows.length === total ? String( total ) : rows.length + ' of ' + total;
 		renderSizes( s );
 		var empty = $( 'sites-empty' );
 		empty.hidden = rows.length > 0;
