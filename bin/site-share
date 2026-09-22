@@ -86,18 +86,20 @@ fi
 
 # One tunnel at a time: stop whatever runs.
 pid="$(state_pid)"; if alive "$pid"; then kill "$pid" 2> /dev/null || true; sleep 1; fi
+# Detach without nohup: under php-fpm (the dashboard) there is no console and macOS's nohup refuses to run at all.
+trap '' HUP
 if [ -n "$mapped_host" ]; then
 	tunnel="$(awk '/^tunnel:/ { print $2; exit }' "$CONF")"
-	nohup "$CF" tunnel run "$tunnel" >> "$SHARELOG" 2>&1 &
-	pid=$!; mode=named; url="https://$mapped_host"
+	"$CF" tunnel run "$tunnel" < /dev/null >> "$SHARELOG" 2>&1 &
+	pid=$!; disown "$pid" 2> /dev/null || true; mode=named; url="https://$mapped_host"
 	# every hostname the named tunnel serves whose service is a local .test site
 	sites="$(awk -v tld=".$TLD" '/^    service: https:\/\// { s=$2; sub("https://", "", s); if (s ~ tld"$") { sub(tld"$", "", s); print s } }' "$CONF" | jq -R . | jq -s 'unique')"
 	urls="$(awk '/^  - hostname:/ { h=$3 } /^    service: https:\/\/.*\.test$/ { print "https://" h }' "$CONF" | jq -R . | jq -s 'unique')"
 else
 	# --config /dev/null: without it cloudflared also loads ~/.cloudflared/config.yml, whose ingress catch-all (404) and
 	# credentials hijack the quick tunnel. http2 rather than QUIC, which many office networks block.
-	nohup "$CF" tunnel --config /dev/null --protocol http2 --url "https://$NAME.$TLD" --no-tls-verify --http-host-header "$NAME.$TLD" >> "$SHARELOG" 2>&1 &
-	pid=$!; mode=quick; url=""
+	"$CF" tunnel --config /dev/null --protocol http2 --url "https://$NAME.$TLD" --no-tls-verify --http-host-header "$NAME.$TLD" < /dev/null >> "$SHARELOG" 2>&1 &
+	pid=$!; disown "$pid" 2> /dev/null || true; mode=quick; url=""
 	for i in $(seq 1 40); do
 		url="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$SHARELOG" 2> /dev/null | tail -1 || true)"
 		[ -n "$url" ] && break; sleep 0.5

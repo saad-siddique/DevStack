@@ -468,5 +468,8 @@ docs/                 the MAMP-to-Valet handoff, build records (docs/superpowers
   `KeepAlive` except nginx.
 - php-fpm merges a second `[valet]` section from `php-fpm.d/zz-devstack.conf` over Valet's `valet-fpm.conf`, so pool
   tuning survives Valet regenerating its file.
+- `nohup` on macOS refuses to run at all when there is no controlling terminal ("can't detach from console"), which is
+  exactly the situation under php-fpm. Background work started from the dashboard uses a plain `cmd < /dev/null
+  > log 2>&1 &` (plus `trap '' HUP` and `disown` in bash) instead.
 - A GUI app starts with a bare environment. `bin/devstack` puts `/opt/homebrew/bin` first on `PATH`, and the sudoers
   rules from `valet trust` cover any process of the user, so `valet` and `brew services` work from the app without a TTY.

@@ -173,7 +173,8 @@ if ( '' !== $api ) {
 
 	if ( 'sizes-refresh' === $api && $is_write ) {
 		// du over every site takes minutes: start it detached and let the next status reload pick the numbers up.
-		$cmd = sprintf( 'nohup %s --refresh --json > /dev/null 2>&1 &', escapeshellarg( $repo_bin . '/site-sizes' ) );
+		// No nohup: php-fpm has no console and macOS's nohup refuses to run without one. A plain background job survives.
+		$cmd = sprintf( '( %s --refresh --json < /dev/null > /dev/null 2>&1 & )', escapeshellarg( $repo_bin . '/site-sizes' ) );
 		exec( 'PATH=/opt/homebrew/bin:/usr/bin:/bin HOME=' . escapeshellarg( $home ) . ' ' . $cmd );
 		devstack_json( 202, array( 'started' => true ) );
 	}
