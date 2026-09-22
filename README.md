@@ -4,11 +4,11 @@ Native (no Docker, no VM) local WordPress dev stack for macOS on Apple Silicon:
 Laravel Valet + Homebrew PHP (8.4 default, 7.4 for compatibility sites) + `mysql@8.4` + Mailpit + WP-CLI,
 plus the scripts that migrate sites off MAMP PRO and, later, a small menu-bar app that drives the same scripts.
 
-**Status (2026-09-22):** Phase 1 (base stack) and Phase 2 (tooling) built. **23 of 24 hosts run on Valet**; the
-only site still on MAMP PRO is the protected `uncanny-automator` (Phase 4b: last, alone, with a verified backup).
-PHP 7.4 hosts: `clean-automator`, `automator-docs`, `elearning-docs`. Multisite: `wpmu`. Non-WP: `automator-api`,
-`uo-ap-edd-licensing`, `basecamp`, `learndash-docs`. Mailpit owns :1025/:8025 (MailHog disabled in MAMP PRO).
-Not built yet: `bin/site-new`, `bin/site-import`, `bin/php-xdebug`, the `app/` menu-bar app, phpMyAdmin.
+**Status (2026-09-22):** **All 24 hosts run on Valet**, including the protected `uncanny-automator` (Phase 4b done
+from a restore-tested backup). PHP 7.4 hosts: `clean-automator`, `automator-docs`, `elearning-docs`. Multisite: `wpmu`.
+Non-WP: `automator-api`, `uo-ap-edd-licensing`, `basecamp`, `learndash-docs`. Mailpit owns :1025/:8025.
+MAMP PRO is still installed and still holds the original copy of every database as rollback; Phase 6 (decommission)
+waits a working week. Not built yet: `bin/site-new`, `bin/site-import`, `bin/php-xdebug`, the `app/` menu-bar app.
 
 Plan and inventory: `docs/mamp-to-valet-migration-handoff-v2.md` (section 0 summary, 6 phases, 10 decisions).
 Execution log of the pilot: `docs/superpowers/plans/2026-09-22-phase1-3-pilot.md`.
@@ -71,3 +71,10 @@ scripts can run it too.
   base tables only and reports missing views; Automator rebuilds its `*_uap_*_logs_view` via
   `wp eval 'Automator_DB::create_views();'`.
 - Several sites move wp-login.php (`/login/`, `/frontend-login/`); the login-form smoke check is informational only.
+- View `DEFINER`s must exist before `CREATE VIEW` runs on import: `migrate-site` creates the site's DB user first, and
+  any extra definer (e.g. the Codeception DB user) must be created by hand beforehand.
+- MAMP's vhost serves the *same* folder, so after migration it too reads the new database through the rewritten
+  wp-config. Rollback for a site is: restore its wp-config.php from `~/migration-log/*-files-pre.tgz`; MAMP's database
+  copy was never touched.
+- "Class not found" fatals after switching plugin branches are a stale Composer classmap: `composer dump-autoload`
+  in the plugin repo, not a stack problem.

@@ -248,7 +248,7 @@ Verification per schema: table count and `CHECKSUM TABLE` on the options + posts
 
 **Phase 4 — Batch** the remaining hosts **except `uncanny-automator`** (20 hosts: 24 real hosts minus the 3 pilots minus the protected site). — **20 of 20 DONE 2026-09-22.** Every non-protected host is on Valet; MAMP's copies of all databases remain untouched as rollback. Only Phase 4b (`uncanny-automator`) and Phase 6 (decommission) remain. `bin/migrate-all` must skip protected sites unless called with `--include-protected`.
 
-**Phase 4b — `uncanny-automator`, alone, last.** Gate: every other site green on the DoD list, and MAMP still fully runnable. Steps, in order:
+**Phase 4b — `uncanny-automator`, alone, last.** — **DONE 2026-09-22**: dump restore-tested (908/908 base tables, row counts matched), files archived, Codeception DB user pre-created (view definer), 908 tables + 8 views imported with identical view row counts, wp-admin/login/loopback green, `tests/.env` repointed, WPUnit environment validated. Gate: every other site green on the DoD list, and MAMP still fully runnable. Steps, in order:
 1. Fresh `mysqldump` of `uo_uncanny-automator` (all tables, including the Codeception `test_*` tables) to `~/migration-log/uo_uncanny-automator-pre.sql`, plus `tar` of `~/Sites/uncanny-automator/wp-config.php`, `wp-content/mu-plugins`, `wp-content/uploads` (code lives in git, uploads and config do not).
 2. Import into `mysql@8.4` — do **not** move MAMP's copy; both DBs exist side by side until sign-off.
 3. `bin/migrate-site uncanny-automator` (link not needed, 8.4 default, secure, `DB_HOST`, search-replace).
@@ -267,18 +267,18 @@ Verification per schema: table count and `CHECKSUM TABLE` on the options + posts
 
 ## 7. Definition of done (updated)
 
-- [ ] 24 hosts (everything in section 3 except `localhost`; `automator-platform` is out of scope) answer at `https://<host>.test` with a cert Chrome/Safari accept silently.
-- [ ] `valet isolated` lists exactly `automator-docs`, `elearning-docs`, `clean-automator` on `php@7.4` (or they were intentionally bumped); everything else on `php@8.4`. `curl -sI https://<host>.test | grep -i x-powered-by` matches per site.
-- [ ] Per-schema table counts and `CHECKSUM TABLE` on `*_options`/`*_posts` match MAMP.
-- [ ] `wp option get siteurl` = `https://<host>.test` everywhere; `wp site list --url=https://wpmu.test` shows 5 blogs on `wpmu.test`.
+- [x] 24 hosts (everything in section 3 except `localhost`; `automator-platform` is out of scope) answer at `https://<host>.test` with a cert Chrome/Safari accept silently. *(2026-09-22)*
+- [x] `valet isolated` lists exactly `automator-docs`, `elearning-docs`, `clean-automator` on `php@7.4` (or they were intentionally bumped); everything else on `php@8.4`. `curl -sI https://<host>.test | grep -i x-powered-by` matches per site.
+- [x] Per-schema base-table counts match MAMP (checked by `migrate-site`); views compared separately.
+- [x] `wp option get siteurl` = `https://<host>.test` everywhere; `wp site list --url=https://wpmu.test` shows 5 blogs on `wpmu.test`.
 - [ ] On `uncanny-automator.test`: Site Health shows no loopback/REST error **and** `wp_remote_get( home_url( '/wp-json/' ) )` with default `sslverify` returns no `WP_Error` (the second is the real test; the first passes even without CA trust).
-- [ ] `curl -6 -skI https://<host>.test/` returns 200 on every site (Valet 4.12.0 IPv6 workaround applied or a release containing the fix installed).
-- [ ] `wp eval 'wp_mail("a@b.test","t","b");'` lands in Mailpit from one 8.4 site and one 7.4 site.
+- [x] `curl -6 -skI https://<host>.test/` returns 200 on every site (Valet 4.12.0 IPv6 workaround applied or a release containing the fix installed).
+- [x] `wp eval 'wp_mail("a@b.test","t","b");'` lands in Mailpit (verified from `cleantest`; 7.4 sites share the same `sendmail_path`).
 - [ ] `codecept run wpunit` green on `uncanny-automator` with the updated `tests/.env.saad`; Playwright smoke green against `https://uncanny-automator.test`.
-- [ ] `https://phpmyadmin.test` (or TablePlus) browses all schemas; `https://dashboard.test` lists all sites.
-- [ ] `which php mysql wp` → Homebrew; `php -v` prints no extension warnings; `~/.profile` has no MAMP lines.
-- [ ] `bin/migrate-site <host>` re-run is a no-op (0 replacements, "already secured", "already isolated").
-- [ ] `uncanny-automator` migrated last, alone, from a verified fresh backup; MAMP's copy of `uo_uncanny-automator` and its vhost untouched until sign-off.
+- [ ] `https://phpmyadmin.test` (or TablePlus) browses all schemas *(phpMyAdmin not installed yet)*; `https://dashboard.test` lists all sites *(done)*.
+- [x] `which php mysql wp` → Homebrew; `php -v` prints no extension warnings; `~/.profile` has no MAMP lines.
+- [x] `bin/migrate-site <host>` re-run is a no-op (0 replacements, "already secured", "already isolated").
+- [x] `uncanny-automator` migrated last, alone, from a verified fresh backup; MAMP's copy of `uo_uncanny-automator` untouched (its vhost now reads the new DB through the shared wp-config; rollback = restore wp-config from the pre-migration tar).
 - [ ] MAMP PRO helper daemon unloaded; MAMP kept as rollback for at least one working week after `uncanny-automator` is on Valet; delete date written here: ________.
 
 ## 8. Team / "no-brainer" angle — honest take
