@@ -39,8 +39,16 @@ sites="$(for l in "$VALET_HOME"/Sites/*; do
 	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" '{name:$name,php:$php,secured:$secured,wp:$wp,path:$path}'
 done | jq -s 'sort_by(.name)')"
 
+# Port owner: when several processes listen (Docker's *:6379 beside Homebrew's 127.0.0.1:6379), prefer the
+# loopback-bound local one; normalise lsof's truncated names.
+port_owner() {
+	local names
+	names="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN 2> /dev/null | awk 'NR>1{print $1}' | sort -u)"
+	local pick; pick="$(printf '%s\n' "$names" | /usr/bin/grep -v '^com\.docke' | head -1)"; [ -n "$pick" ] || pick="$(printf '%s\n' "$names" | head -1)"
+	case "$pick" in redis-ser*) echo redis ;; com.docke*) echo docker ;; mysqld) echo mysql ;; *) echo "$pick" ;; esac
+}
 ports="$(for p in 80 443 3306 1025 8025 6379 11211; do
-	owner="$(lsof -nP -iTCP:$p -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"
+	owner="$(port_owner "$p")"
 	jq -n --arg p "$p" --arg o "${owner:-}" '{($p): (if $o == "" then null else $o end)}'
 done | jq -s 'add')"
 

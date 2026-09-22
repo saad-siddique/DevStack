@@ -50,7 +50,7 @@
 			if ( ! svc ) { return; }
 			var on = 'started' === svc.status;
 			var role  = ROLES[ name ] ? ROLES[ name ] + ', ' : '';
-			var state = on ? role + 'running' + ( svc.user ? ' as ' + svc.user : '' ) : role + ( 'none' === svc.status ? 'stopped' : svc.status );
+			var state = on ? role + 'running' + ( svc.user ? ' (' + ( 'root' === svc.user ? 'root' : 'you' ) + ')' : '' ) : role + ( 'none' === svc.status ? 'stopped' : svc.status );
 			var actions = el( 'span', { 'class': 'actions' } );
 			if ( on ) {
 				actions.appendChild( button( 'Restart', '', function () { return post( 'service', { name: name, op: 'restart' } ); } ) );
