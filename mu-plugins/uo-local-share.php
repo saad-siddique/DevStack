@@ -32,8 +32,14 @@ if ( $uo_via_tunnel && ! defined( 'WP_CLI' ) ) {
 	}
 
 	if ( '' !== $uo_public_host ) {
-		$_SERVER['HTTPS'] = 'on';   // the tunnel terminates TLS; is_ssl() must agree or WordPress redirects in a loop
-		$uo_public_url    = 'https://' . preg_replace( '/[^a-zA-Z0-9.\-:]/', '', $uo_public_host );
+		$uo_public_host = preg_replace( '/[^a-zA-Z0-9.\-:]/', '', $uo_public_host );
+		// Forceful override, as the old per-developer wp-config block did: plugins that read $_SERVER directly
+		// (instead of home_url()) also see the public host. Multisite has already picked its blog by now.
+		$_SERVER['HTTP_HOST']   = $uo_public_host;
+		$_SERVER['SERVER_NAME'] = $uo_public_host;
+		$_SERVER['SERVER_PORT'] = '443';
+		$_SERVER['HTTPS']       = 'on';   // the tunnel terminates TLS; is_ssl() must agree or WordPress redirects in a loop
+		$uo_public_url          = 'https://' . $uo_public_host;
 		$uo_public_filter = static function () use ( $uo_public_url ) {
 			return $uo_public_url;
 		};

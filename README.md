@@ -272,9 +272,12 @@ public URL through Cloudflare, detached, until you stop it:
 site's own row carries the public URL (copy, open) and the green globe stops it; nothing sits up top.
 
 WordPress under a foreign hostname would normally redirect to its `.test` address. The `uo-local-share.php`
-mu-plugin, present in every site, filters `home`/`siteurl` to the request host when Cloudflare headers are present
-(at priority 99, above a `WP_HOME` constant), marks the request HTTPS and disables canonical redirects, so pages,
-assets and REST callbacks all use the public URL. No per-developer `wp-config.php` block is needed any more.
+mu-plugin, present in every site, does what the old per-developer "Cloudflare Tunnel Support" block in
+`wp-config.php` did, for every site and any hostname: when Cloudflare headers are present it takes the public host
+from `X-Forwarded-Host` (or from the share state), rewrites `$_SERVER['HTTP_HOST']`, `SERVER_NAME`, `SERVER_PORT`
+and `HTTPS`, filters `home`/`siteurl` at priority 99 (above a `WP_HOME` constant) and disables canonical redirects.
+Pages, the login form, wp-admin redirects and REST all answer under the public URL, and the `.test` address behaves
+as before. Those wp-config blocks can be deleted.
 
 ## Backups, archive, restore, clone
 
