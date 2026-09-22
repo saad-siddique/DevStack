@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# site-remove <name> --yes [--keep-files] [--keep-db]
+# Unsecure + unlink from Valet, drop the site's database and DB user (read from wp-config), delete the folder.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+NAME="" ; YES=0 ; KEEP_FILES=0 ; KEEP_DB=0
+for arg in "$@"; do
+	case "$arg" in
+		--yes) YES=1 ;; --keep-files) KEEP_FILES=1 ;; --keep-db) KEEP_DB=1 ;;
+		--*) die "unknown flag $arg" ;;
+		*) NAME="$arg" ;;
+	esac
+done
+[ -n "$NAME" ] || die "usage: site-remove <name> --yes [--keep-files] [--keep-db]"
+[ "1" = "$YES" ] || die "refusing without --yes (this deletes the folder and the database)"
+if awk -F'\t' -v h="$NAME" '$0 !~ /^#/ && $1 == h && $5 == "yes" { f=1 } END { exit !f }' "$SITES_TSV"; then die "$NAME is a PROTECTED site in sites.tsv; not removing"; fi
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || echo "$SITES_DIR/$NAME")"
+log "=== site-remove $NAME ($SITE_PATH)"
+
+if [ -f "$SITE_PATH/wp-config.php" ] && [ "1" != "$KEEP_DB" ]; then
+	php="$DEFAULT_PHP"; [ -f "$SITE_PATH/.valetrc" ] && php="$(sed -n 's/^php=//p' "$SITE_PATH/.valetrc")"
+	db="$(wp_site "$php" "$SITE_PATH" config get DB_NAME 2> /dev/null || true)"
+	user="$(wp_site "$php" "$SITE_PATH" config get DB_USER 2> /dev/null || true)"
+	if [ -n "$db" ]; then mysql_new -e "DROP DATABASE IF EXISTS \`$(printf '%s' "$db" | sed 's/`/``/g')\`"; log "dropped database $db"; fi
+	if [ -n "$user" ] && [ "root" != "$user" ] && [ "wp_root_user" != "$user" ]; then
+		u="$(sql_quote "$user")"; mysql_new -e "DROP USER IF EXISTS '$u'@'localhost', '$u'@'127.0.0.1'"; log "dropped user $user"
+	fi
+fi
+[ -f "$VALET_HOME/Certificates/$NAME.$TLD.crt" ] && { valet unsecure "$NAME" > /dev/null 2>&1 || true; log "unsecured"; }
+[ -L "$VALET_HOME/Sites/$NAME" ] && { valet unlink "$NAME" > /dev/null 2>&1 || rm -f "$VALET_HOME/Sites/$NAME"; log "unlinked"; }
+rm -f "$VALET_HOME/Nginx/$NAME.$TLD" 2> /dev/null || true
+if [ "1" != "$KEEP_FILES" ] && [ -d "$SITE_PATH" ]; then rm -rf "$SITE_PATH"; log "deleted $SITE_PATH"; fi
+log "done"
