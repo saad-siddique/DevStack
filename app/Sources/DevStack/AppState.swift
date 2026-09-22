@@ -95,7 +95,8 @@ final class AppState: ObservableObject {
 		notifier.post(title: title, body: body)
 	}
 
-	/// ⌃⌥D: click the status item if we can find it, else show the panel in an ordinary window.
+	/// ⌃⌥D: SwiftUI gives no way to open a MenuBarExtra from code (its popover is not even in NSApp.windows, and an
+	/// Accessibility press on the status item does not open it), so the hotkey shows the same panel in a window.
 	func togglePanel() {
 		if let button = NSApp.windows.compactMap({ $0.contentView }).lazy.compactMap({ Self.statusBarButton(in: $0) }).first {
 			button.performClick(nil)

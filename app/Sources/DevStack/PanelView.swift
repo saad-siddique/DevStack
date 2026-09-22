@@ -53,8 +53,9 @@ struct PanelView: View {
 			footer.padding(.horizontal, 14).padding(.bottom, 10)
 		}
 		.frame(width: 400)
-		.background(t.background)
+		.background(t.dark ? Color.black.opacity(0.18) : Color.white.opacity(0.28))   // tint on the popover's own material: one continuous glass
 		.tint(t.accent)
+		.ignoresSafeArea()
 		.onAppear {
 			state.showModalWindow = { openWindow(id: "modal"); activate() }
 			state.panelDidAppear()
@@ -103,7 +104,7 @@ struct PanelView: View {
 			}
 		}
 		.padding(.horizontal, 16).padding(.vertical, 14)
-		.background(t.hero)
+		.background(t.hero.ignoresSafeArea(edges: .top))
 	}
 
 	private var panelMenu: some View {
