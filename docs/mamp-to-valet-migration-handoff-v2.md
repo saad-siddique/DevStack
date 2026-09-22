@@ -263,7 +263,7 @@ Verification per schema: table count and `CHECKSUM TABLE` on the options + posts
 
 **Phase 5 — Optional**: Xdebug per version (`pecl install xdebug`, `xdebug.mode=debug`, `xdebug.start_with_request=trigger`, browser toggle), Redis object cache via `wp redis enable` where wanted (Redis server: reuse the Docker one on 6379 while `automator-platform` is up, or run the Homebrew cask on 6380 — do not run both on 6379).
 
-**Phase 6 — Decommission MAMP PRO**: stop servers in the app → `sudo launchctl unload /Library/LaunchDaemons/de.appsolute.mampprohelper.plist` → delete the 60-line `# MAMP PRO - Do NOT remove this entry!` block from `/etc/hosts` (bare names never collided with `.test`, but stale) → keep `/Applications/MAMP` and `~/mamp-dump-*.sql` for two weeks as rollback → then trash `/Applications/MAMP`, `/Applications/MAMP PRO.app`, `/Library/Application Support/appsolute`, `~/Library/Application Support/appsolute`.
+**Phase 6 — Decommission MAMP PRO** (step 1 done 2026-09-22 via `bin/mamp-backout`: servers stopped, app quit, helper daemon unloaded and removed, `/etc/hosts` entries removed, shell profiles stripped with a `~/.zshrc` guard; `/Applications/MAMP` and `MAMP PRO.app` kept for the rollback window): stop servers in the app → `sudo launchctl unload /Library/LaunchDaemons/de.appsolute.mampprohelper.plist` → delete the 60-line `# MAMP PRO - Do NOT remove this entry!` block from `/etc/hosts` (bare names never collided with `.test`, but stale) → keep `/Applications/MAMP` and `~/mamp-dump-*.sql` for two weeks as rollback → then trash `/Applications/MAMP`, `/Applications/MAMP PRO.app`, `/Library/Application Support/appsolute`, `~/Library/Application Support/appsolute`.
 
 ## 7. Definition of done (updated)
 

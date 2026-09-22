@@ -22,8 +22,9 @@ php/                  zz-uo-dev.ini drop-in, copied into each /opt/homebrew/etc/
 drivers/              LocalValetDriver for the subdirectory multisite (wpmu)
 mu-plugins/           uo-local-ssl.php (https_ssl_verify → false, local only)
 dashboard/            interim dashboard.test (one PHP file), retired once app/ exists
-bin/                  THE CONTRACT — every command supports --json
-                      site-new  site-import  migrate-site  migrate-all  php-xdebug  php-switch  stack-status
+bin/                  THE CONTRACT — every command supports --json where output is consumed by tooling
+                      migrate-site  migrate-all  stack-status  mamp-backout   (built)
+                      site-new  site-import  php-xdebug  php-switch          (not yet)
 app/                  SwiftUI MenuBarExtra + Swift Charts (macOS 13+), Swift Package; only ever calls bin/*
 docs/                 the handoff/plan and, later, runbooks
 ```
@@ -45,6 +46,7 @@ cd ~/Work/local-devstack && ./bootstrap.sh        # asks for sudo twice on a fre
 bin/migrate-site cleantest --json                 # one site: link → isolate → secure → DB copy → DB_HOST → URLs → smoke
 bin/migrate-all                                   # everything in sites.tsv except protected sites
 bin/stack-status | jq .                           # services, sites, ports, MySQL qps, mail catcher
+bin/mamp-backout                                  # after MAMP PRO is stopped: hosts entries, helper daemon, shell hooks
 ```
 
 `bootstrap.sh` is idempotent and safe to re-run. After `valet trust` it is fully non-interactive, so agents and
@@ -76,5 +78,7 @@ scripts can run it too.
 - MAMP's vhost serves the *same* folder, so after migration it too reads the new database through the rewritten
   wp-config. Rollback for a site is: restore its wp-config.php from `~/migration-log/*-files-pre.tgz`; MAMP's database
   copy was never touched.
+- MAMP PRO rewrites `~/.profile` (PATH + `php`/`mysql`/`python` aliases) every time it runs, even on quit. `bin/mamp-backout`
+  strips it and appends a guard to `~/.zshrc` that un-aliases and de-paths anything MAMP re-adds.
 - "Class not found" fatals after switching plugin branches are a stale Composer classmap: `composer dump-autoload`
   in the plugin repo, not a stack problem.
