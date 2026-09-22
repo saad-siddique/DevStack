@@ -4,12 +4,10 @@ Native (no Docker, no VM) local WordPress dev stack for macOS on Apple Silicon:
 Laravel Valet + Homebrew PHP (8.4 default, 7.4 for compatibility sites) + `mysql@8.4` + Mailpit + WP-CLI,
 plus the scripts that migrate sites off MAMP PRO and, later, a small menu-bar app that drives the same scripts.
 
-**Status (2026-09-22):** Phase 1 (base stack) and Phase 2 (tooling) built. 17 of 24 hosts run on Valet:
-`cleantest`, `clean-automator` (7.4), `automator-docs` (7.4), `elearning-docs` (7.4), `automatorplugin`,
-`automator-app-dev`, `elearning-plugins`, `automator-plugin-platform`, `hrpartner`, `unito`, `lindris`, `uncannyowl`,
-`wpmu` (subdirectory multisite), `automator-api`, `uo-ap-edd-licensing`, `basecamp`, `learndash-docs`.
-Still on MAMP PRO: `tincanny`, `tincanny-core`, `uncanny-ceu`, `uncanny-codes`, `uncanny-groups`, `uncanny-toolkit`,
-and the protected `uncanny-automator`. Mailpit took over :1025/:8025 once MailHog was disabled in MAMP PRO.
+**Status (2026-09-22):** Phase 1 (base stack) and Phase 2 (tooling) built. **23 of 24 hosts run on Valet**; the
+only site still on MAMP PRO is the protected `uncanny-automator` (Phase 4b: last, alone, with a verified backup).
+PHP 7.4 hosts: `clean-automator`, `automator-docs`, `elearning-docs`. Multisite: `wpmu`. Non-WP: `automator-api`,
+`uo-ap-edd-licensing`, `basecamp`, `learndash-docs`. Mailpit owns :1025/:8025 (MailHog disabled in MAMP PRO).
 Not built yet: `bin/site-new`, `bin/site-import`, `bin/php-xdebug`, the `app/` menu-bar app, phpMyAdmin.
 
 Plan and inventory: `docs/mamp-to-valet-migration-handoff-v2.md` (section 0 summary, 6 phases, 10 decisions).
@@ -69,3 +67,7 @@ scripts can run it too.
   point at the MAMP host. `display_errors=On` sends CLI warnings to stdout, so WP-CLI is run with
   `-d display_errors=stderr` whenever its output is captured.
 - `wp search-replace` skips `guid` on purpose; a handful of `https://<host>:8890` GUIDs remain and that is fine.
+- A stale `VIEW` whose base table is gone makes `mysqldump` abort. The dump runs with `--force`, the import compares
+  base tables only and reports missing views; Automator rebuilds its `*_uap_*_logs_view` via
+  `wp eval 'Automator_DB::create_views();'`.
+- Several sites move wp-login.php (`/login/`, `/frontend-login/`); the login-form smoke check is informational only.

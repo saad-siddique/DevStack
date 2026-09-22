@@ -80,12 +80,17 @@ if [ "0" = "$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.SCHEMATA 
 		log "DRY: mysqldump $SITE_DB -> $dump ; mysql < $dump"
 		step_db="would import"
 	else
-		mysqldump_old --single-transaction --routines --triggers --default-character-set=utf8mb4 --databases "$SITE_DB" > "$dump"
-		mysql_new < "$dump"
-		old_n="$(mysql_old -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$SITE_DB'")"
-		new_n="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$SITE_DB'")"
-		[ "$old_n" = "$new_n" ] || die "table count mismatch after import: MAMP=$old_n new=$new_n"
-		step_db="imported $new_n tables"
+		# --force: skip broken objects (e.g. a stale VIEW whose base table is gone) instead of aborting the whole dump.
+		dump_err="$(mysqldump_old --force --single-transaction --routines --triggers --default-character-set=utf8mb4 --databases "$SITE_DB" 2>&1 > "$dump" | /usr/bin/grep -v 'Using a password' || true)"
+		[ -z "$dump_err" ] || log "warning: mysqldump skipped broken objects: $dump_err"
+		mysql_new --force < "$dump"
+		q="SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$SITE_DB' AND TABLE_TYPE='BASE TABLE'"
+		old_n="$(mysql_old -N -e "$q")"; new_n="$(mysql_new -N -e "$q")"
+		[ "$old_n" = "$new_n" ] || die "base table count mismatch after import: MAMP=$old_n new=$new_n"
+		qv="SELECT COUNT(*) FROM information_schema.VIEWS WHERE TABLE_SCHEMA='$SITE_DB'"
+		old_v="$(mysql_old -N -e "$qv")"; new_v="$(mysql_new -N -e "$qv")"
+		[ "$old_v" = "$new_v" ] || log "warning: $((old_v - new_v)) broken view(s) not imported (Automator recreates its *_logs_view on load)"
+		step_db="imported $new_n tables, $new_v views"
 	fi
 fi
 log "db: $step_db"
