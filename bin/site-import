@@ -79,6 +79,7 @@ if [ -n "$old_url" ] && [ "$old_url" != "$URL" ]; then
 	wp search-replace "https://$old_host" "$URL" "${sr[@]}"
 	wp search-replace "http://$old_host"  "$URL" "${sr[@]}"
 	wp search-replace "//$old_host"       "//$NAME.$TLD" "${sr[@]}"
+	wp search-replace "$old_host"         "$NAME.$TLD"   "${sr[@]}"   # bare host (serialized domain fields, email templates)
 	log "urls: $old_url -> $URL"
 else
 	log "urls: already $URL"

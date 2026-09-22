@@ -1,56 +1,155 @@
 <?php
 /**
- * local-devstack dashboard (interim, replaced by the menu-bar app later).
- * Served by Valet as https://dashboard.test from the repo's dashboard/ folder.
+ * local-devstack dashboard.
+ *
+ * GET  /               HTML shell (app.js fetches the JSON below every 5 s).
+ * GET  /?api=status    bin/stack-status + Xdebug state + tool links.
+ * POST /?api=service   name=<service> op=start|stop|restart   -> bin/service
+ * POST /?api=xdebug    php=8.4|7.4  op=on|off                  -> bin/php-xdebug
+ *
+ * Writes need the request header X-Devstack: 1. A page on another origin cannot add that header without a
+ * CORS preflight, which this endpoint never answers, so a stray tab cannot stop your services.
  */
 
-$valet_home = ( getenv( 'HOME' ) ?: '/Users/' . get_current_user() ) . '/.config/valet';
-$config     = json_decode( (string) @file_get_contents( $valet_home . '/config.json' ), true ) ?: array();
-$tld        = isset( $config['tld'] ) ? $config['tld'] : 'test';
-$sites      = array();
+declare( strict_types=1 );
 
-foreach ( glob( $valet_home . '/Sites/*' ) ?: array() as $link ) {
-	$name   = basename( $link );
-	$target = (string) readlink( $link );
-	$nginx  = $valet_home . '/Nginx/' . $name . '.' . $tld;
-	$php    = 'default';
-	if ( is_file( $nginx ) && preg_match( '/valet(\d)(\d+)\.sock/', (string) file_get_contents( $nginx ), $m ) ) {
-		$php = $m[1] . '.' . $m[2];
-	}
-	$sites[] = array(
-		'name'    => $name,
-		'target'  => $target,
-		'secured' => is_file( $valet_home . '/Certificates/' . $name . '.' . $tld . '.crt' ),
-		'php'     => $php,
+$repo_bin = dirname( __DIR__ ) . '/bin';
+$home     = getenv( 'HOME' ) ?: '/Users/' . get_current_user();
+$api      = isset( $_GET['api'] ) ? (string) $_GET['api'] : '';
+
+/**
+ * Run one repo command with a sane environment and return [exit code, stdout, stderr].
+ *
+ * @param string[] $argv Command and arguments (escaped here).
+ */
+function devstack_run( array $argv, string $home ): array {
+	$cmd  = implode( ' ', array_map( 'escapeshellarg', $argv ) );
+	$env  = array(
+		'HOME' => $home,
+		'USER' => get_current_user(),
+		'PATH' => '/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin',
+		'LANG' => 'en_US.UTF-8',
 	);
+	$spec = array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) );
+	$proc = proc_open( $cmd, $spec, $pipes, null, $env );
+	if ( ! is_resource( $proc ) ) {
+		return array( 1, '', 'could not start process' );
+	}
+	$out = (string) stream_get_contents( $pipes[1] );
+	$err = (string) stream_get_contents( $pipes[2] );
+	fclose( $pipes[1] );
+	fclose( $pipes[2] );
+	return array( proc_close( $proc ), $out, $err );
 }
-usort( $sites, static function ( $a, $b ) { return strcmp( $a['name'], $b['name'] ); } );
+
+function devstack_json( int $status, array $payload ): void {
+	http_response_code( $status );
+	header( 'Content-Type: application/json; charset=utf-8' );
+	header( 'Cache-Control: no-store' );
+	echo json_encode( $payload, JSON_UNESCAPED_SLASHES );
+	exit;
+}
+
+if ( '' !== $api ) {
+	$is_write = 'POST' === ( $_SERVER['REQUEST_METHOD'] ?? 'GET' );
+
+	if ( $is_write && '1' !== ( $_SERVER['HTTP_X_DEVSTACK'] ?? '' ) ) {
+		devstack_json( 403, array( 'error' => 'Missing X-Devstack header.' ) );
+	}
+
+	if ( 'status' === $api && ! $is_write ) {
+		list( $code, $out ) = devstack_run( array( $repo_bin . '/stack-status' ), $home );
+		$status             = json_decode( $out, true );
+		if ( 0 !== $code || ! is_array( $status ) ) {
+			devstack_json( 500, array( 'error' => 'stack-status failed' ) );
+		}
+		list( , $xout )   = devstack_run( array( $repo_bin . '/php-xdebug', 'status', '--json' ), $home );
+		$status['xdebug'] = json_decode( $xout, true ) ?: array();
+		$status['tools']  = array(
+			'phpmyadmin' => 'https://phpmyadmin.test',
+			'mailpit'    => 'http://localhost:8025',
+		);
+		$status['sites_dir'] = $home . '/Sites';
+		devstack_json( 200, $status );
+	}
+
+	if ( 'service' === $api && $is_write ) {
+		$allowed_names = array( 'nginx', 'dnsmasq', 'php@8.4', 'php@7.4', 'mysql@8.4', 'mailpit' );
+		$allowed_ops   = array( 'start', 'stop', 'restart' );
+		$name          = (string) ( $_POST['name'] ?? '' );
+		$op            = (string) ( $_POST['op'] ?? '' );
+		if ( ! in_array( $name, $allowed_names, true ) || ! in_array( $op, $allowed_ops, true ) ) {
+			devstack_json( 400, array( 'error' => 'Unknown service or operation.' ) );
+		}
+		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/service', $name, $op, '--json' ), $home );
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'service failed' ) );
+	}
+
+	if ( 'xdebug' === $api && $is_write ) {
+		$php = (string) ( $_POST['php'] ?? '' );
+		$op  = (string) ( $_POST['op'] ?? '' );
+		if ( ! in_array( $php, array( '8.4', '7.4' ), true ) || ! in_array( $op, array( 'on', 'off' ), true ) ) {
+			devstack_json( 400, array( 'error' => 'Unknown PHP version or operation.' ) );
+		}
+		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/php-xdebug', $op, '--php', $php, '--json' ), $home );
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'php-xdebug failed' ) );
+	}
+
+	devstack_json( 404, array( 'error' => 'Unknown api.' ) );
+}
 
 header( 'Content-Type: text/html; charset=utf-8' );
+header( 'Cache-Control: no-store' );
 ?>
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>local-devstack</title>
-<style>
-	body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 2rem auto; max-width: 900px; color: #222; padding: 0 1rem; }
-	table { border-collapse: collapse; width: 100%; }
-	th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #ddd; }
-	.ok { color: #1a7f37; } .warn { color: #9a6700; }
-</style>
-<h1>local-devstack</h1>
-<p>
-	<a href="http://localhost:8025">Mail (Mailpit / MailHog on :8025)</a> ·
-	<?php echo count( $sites ); ?> linked site(s) ·
-	valet home <code><?php echo htmlspecialchars( $valet_home ); ?></code>
-</p>
-<table>
-	<tr><th>Site</th><th>PHP</th><th>HTTPS</th><th>Folder</th></tr>
-	<?php foreach ( $sites as $site ) : ?>
-	<tr>
-		<td><a href="https://<?php echo htmlspecialchars( $site['name'] . '.' . $tld ); ?>"><?php echo htmlspecialchars( $site['name'] . '.' . $tld ); ?></a></td>
-		<td><?php echo htmlspecialchars( $site['php'] ); ?></td>
-		<td class="<?php echo $site['secured'] ? 'ok' : 'warn'; ?>"><?php echo $site['secured'] ? 'secured' : 'http only'; ?></td>
-		<td><code><?php echo htmlspecialchars( $site['target'] ); ?></code></td>
-	</tr>
-	<?php endforeach; ?>
-</table>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="style.css?v=<?php echo (int) filemtime( __DIR__ . '/style.css' ); ?>">
+</head>
+<body>
+<header class="masthead">
+	<h1>local-devstack</h1>
+	<p class="summary" id="summary" aria-live="polite">Reading the stack…</p>
+	<span class="pulse" id="pulse" title="Live" aria-hidden="true"></span>
+</header>
+
+<main>
+	<section class="panel" aria-labelledby="services-h">
+		<div class="panel-head">
+			<h2 id="services-h">Services</h2>
+			<p class="hint">Valet runs nginx, dnsmasq and php-fpm as root. MySQL and Mailpit run as you.</p>
+		</div>
+		<ul class="switchboard" id="services"></ul>
+		<ul class="switchboard xdebug" id="xdebug"></ul>
+	</section>
+
+	<section class="panel" aria-labelledby="tools-h">
+		<div class="panel-head">
+			<h2 id="tools-h">Tools</h2>
+		</div>
+		<ul class="tools" id="tools"></ul>
+	</section>
+
+	<section class="panel" aria-labelledby="sites-h">
+		<div class="panel-head">
+			<h2 id="sites-h">Sites <span class="count" id="sites-count"></span></h2>
+			<label class="filter"><span class="visually-hidden">Filter sites</span><input type="search" id="filter" placeholder="Filter sites" autocomplete="off"></label>
+		</div>
+		<table class="sites" id="sites">
+			<thead><tr><th scope="col">Site</th><th scope="col">PHP</th><th scope="col">HTTPS</th><th scope="col">Open</th><th scope="col">Folder</th></tr></thead>
+			<tbody></tbody>
+		</table>
+		<p class="empty" id="sites-empty" hidden></p>
+	</section>
+</main>
+
+<footer class="foot">
+	<p id="foot">Refreshes every 5 seconds. Actions run <code>bin/service</code> and <code>bin/php-xdebug</code> from the repo.</p>
+</footer>
+<script src="app.js?v=<?php echo (int) filemtime( __DIR__ . '/app.js' ); ?>"></script>
+</body>
+</html>

@@ -16,7 +16,8 @@ sites="$(for l in "$VALET_HOME"/Sites/*; do
 		[ -n "$sock" ] && php="$(sed -E 's/valet([0-9])([0-9]+)\.sock/\1.\2/' <<<"$sock")"
 	fi
 	secured=false; [ -f "$VALET_HOME/Certificates/$n.$TLD.crt" ] && secured=true
-	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --arg path "$(readlink "$l")" '{name:$name,php:$php,secured:$secured,path:$path}'
+	target="$(readlink "$l")"; wp=false; [ -f "$target/wp-config.php" ] && wp=true
+	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" '{name:$name,php:$php,secured:$secured,wp:$wp,path:$path}'
 done | jq -s 'sort_by(.name)')"
 
 ports="$(for p in 80 443 3306 1025 8025; do

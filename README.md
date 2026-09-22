@@ -4,11 +4,10 @@ Native (no Docker, no VM) local WordPress dev stack for macOS on Apple Silicon:
 Laravel Valet + Homebrew PHP (8.4 default, 7.4 for compatibility sites) + `mysql@8.4` + Mailpit + WP-CLI,
 plus the scripts that migrate sites off MAMP PRO and, later, a small menu-bar app that drives the same scripts.
 
-**Status (2026-09-22):** **All 24 hosts run on Valet**, including the protected `uncanny-automator` (Phase 4b done
-from a restore-tested backup). PHP 7.4 hosts: `clean-automator`, `automator-docs`, `elearning-docs`. Multisite: `wpmu`.
-Non-WP: `automator-api`, `uo-ap-edd-licensing`, `basecamp`, `learndash-docs`. Mailpit owns :1025/:8025.
-MAMP PRO is still installed and still holds the original copy of every database as rollback; Phase 6 (decommission)
-waits a working week. Not built yet: `bin/site-new`, `bin/site-import`, `bin/php-xdebug`, the `app/` menu-bar app.
+**Status (2026-09-22):** All 24 hosts on Valet; MAMP PRO stopped and backed out of the system (apps kept for now).
+Phase 5 tooling built: `site-new`, `site-import` (LocalWP exports), `site-remove`, `php-xdebug`, `service`, phpMyAdmin
+at `https://phpmyadmin.test` (auto-login as root), and a dashboard at `https://dashboard.test` that shows services,
+sites and PHP versions and can start/stop services and toggle Xdebug. Not built yet: the `app/` menu-bar app.
 
 Plan and inventory: `docs/mamp-to-valet-migration-handoff-v2.md` (section 0 summary, 6 phases, 10 decisions).
 Execution log of the pilot: `docs/superpowers/plans/2026-09-22-phase1-3-pilot.md`.
@@ -23,8 +22,8 @@ drivers/              LocalValetDriver for the subdirectory multisite (wpmu)
 mu-plugins/           uo-local-ssl.php (https_ssl_verify → false, local only)
 dashboard/            interim dashboard.test (one PHP file), retired once app/ exists
 bin/                  THE CONTRACT — every command supports --json where output is consumed by tooling
-                      migrate-site  migrate-all  stack-status  mamp-backout   (built)
-                      site-new  site-import  php-xdebug  php-switch          (not yet)
+                      site-new  site-import  site-remove  php-xdebug  service  stack-status
+                      migrate-site  migrate-all  mamp-backout
 app/                  SwiftUI MenuBarExtra + Swift Charts (macOS 13+), Swift Package; only ever calls bin/*
 docs/                 the handoff/plan and, later, runbooks
 ```
@@ -48,6 +47,20 @@ bin/migrate-all                                   # everything in sites.tsv exce
 bin/stack-status | jq .                           # services, sites, ports, MySQL qps, mail catcher
 bin/mamp-backout                                  # after MAMP PRO is stopped: hosts entries, helper daemon, shell hooks
 ```
+
+## Day-to-day commands
+
+```bash
+bin/site-new myplugin --php 7.4                  # fresh WordPress at https://myplugin.test, prints the admin password once
+bin/site-import client ~/Downloads/client.zip    # LocalWP export (or any zip/folder with a WordPress root + .sql)
+bin/site-remove myplugin --yes                   # unlink, unsecure, drop DB + user, delete folder
+bin/php-xdebug on --php 8.4                      # trigger mode, port 9003; use a browser Xdebug helper or XDEBUG_TRIGGER=1
+bin/service mailpit restart                      # nginx dnsmasq php@8.4 php@7.4 mysql@8.4 mailpit
+bin/stack-status | jq .                          # what the dashboard reads
+```
+
+Dashboard writes (start/stop, Xdebug) are POST requests that require the `X-Devstack: 1` header and only ever call the
+`bin/` commands above with allow-listed arguments, so another website open in your browser cannot trigger them.
 
 `bootstrap.sh` is idempotent and safe to re-run. After `valet trust` it is fully non-interactive, so agents and
 scripts can run it too.
@@ -80,5 +93,11 @@ scripts can run it too.
   copy was never touched.
 - MAMP PRO rewrites `~/.profile` (PATH + `php`/`mysql`/`python` aliases) every time it runs, even on quit. `bin/mamp-backout`
   strips it and appends a guard to `~/.zshrc` that un-aliases and de-paths anything MAMP re-adds.
+- WordPress and WP-CLI look one directory *above* a site for wp-config.php. A stray `~/Sites/wp-config.php` broke
+  `wp config create` for every new site; it now lives in `~/migration-log/stray/`. Keep `~/Sites` free of loose WP files.
+- Under `set -o pipefail`, `tr … < /dev/urandom | head -c N` kills the script with SIGPIPE. `random_secret` reads a
+  fixed chunk first.
+- Xdebug from `shivammathur/extensions` ships as `conf.d/20-xdebug.ini`; off = renamed to `.off`. Bootstrap turns it off
+  the first time it sees it, then `bin/php-xdebug` owns the state.
 - "Class not found" fatals after switching plugin branches are a stale Composer classmap: `composer dump-autoload`
   in the plugin repo, not a stack problem.
