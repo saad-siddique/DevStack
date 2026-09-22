@@ -84,7 +84,12 @@ db_ensure_user() {
 db_name_for() { printf 'wp_%s' "$(printf '%s' "$1" | tr '-' '_')"; }
 
 # random_secret [len] : URL-safe random string.
-random_secret() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "${1:-20}"; }
+random_secret() {
+	# No early-closing pipe here: under pipefail, `tr | head -c` aborts the caller with SIGPIPE.
+	local s; s="$(LC_ALL=C head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9')"
+	printf '%s' "${s:0:${1:-20}}"
+}
+SMOKE_JSON='{"ok":false}'   # set by site_finalize
 
 # site_finalize <host> <path> <php formula> : link, isolate, secure, mu-plugin, smoke. Sets SMOKE_JSON.
 site_finalize() {
