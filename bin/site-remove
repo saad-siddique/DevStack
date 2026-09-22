@@ -17,10 +17,16 @@ if awk -F'\t' -v h="$NAME" '$0 !~ /^#/ && $1 == h && $5 == "yes" { f=1 } END { e
 SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || echo "$SITES_DIR/$NAME")"
 log "=== site-remove $NAME ($SITE_PATH)"
 
-if [ -f "$SITE_PATH/wp-config.php" ] && [ "1" != "$KEEP_DB" ]; then
+if [ "1" != "$KEEP_DB" ]; then
 	php="$DEFAULT_PHP"; [ -f "$SITE_PATH/.valetrc" ] && php="$(sed -n 's/^php=//p' "$SITE_PATH/.valetrc")"
-	db="$(wp_site "$php" "$SITE_PATH" config get DB_NAME 2> /dev/null || true)"
-	user="$(wp_site "$php" "$SITE_PATH" config get DB_USER 2> /dev/null || true)"
+	db=""; user=""
+	if [ -f "$SITE_PATH/wp-config.php" ]; then
+		db="$(wp_site "$php" "$SITE_PATH" config get DB_NAME 2> /dev/null || true)"
+		user="$(wp_site "$php" "$SITE_PATH" config get DB_USER 2> /dev/null || true)"
+	fi
+	# Sites created by site-new/site-import follow wp_<name>; fall back to that when wp-config is missing (half-finished create).
+	[ -n "$db" ] || db="$(db_name_for "$NAME")"
+	[ -n "$user" ] || user="$db"
 	if [ -n "$db" ]; then mysql_new -e "DROP DATABASE IF EXISTS \`$(printf '%s' "$db" | sed 's/`/``/g')\`"; log "dropped database $db"; fi
 	if [ -n "$user" ] && [ "root" != "$user" ] && [ "wp_root_user" != "$user" ]; then
 		u="$(sql_quote "$user")"; mysql_new -e "DROP USER IF EXISTS '$u'@'localhost', '$u'@'127.0.0.1'"; log "dropped user $user"
