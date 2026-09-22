@@ -229,22 +229,24 @@
 			] );
 			// Actions: the things you do to a site.
 			var actions = el( 'td', { 'class': 'actions' } );
-			actions.appendChild( iconLink( 'open', 'Open ' + host, 'https://' + host ) );
+			var group = el( 'div', { 'class': 'ic-group' } );
+			actions.appendChild( group );
+			group.appendChild( iconLink( 'open', 'Open ' + host, 'https://' + host ) );
 			if ( site.wp ) {
-				actions.appendChild( iconLink( 'admin', 'Open wp-admin', 'https://' + host + '/wp-admin/' ) );
+				group.appendChild( iconLink( 'admin', 'Open wp-admin', 'https://' + host + '/wp-admin/' ) );
 				var login = iconButton( 'login', 'Log in to wp-admin (one-time link)' );
 				login.addEventListener( 'click', function () {
 					login.disabled = true;
 					post( 'login', { name: site.name } ).then( function ( r ) { login.disabled = false; if ( r && r.url ) { window.open( r.url, '_blank', 'noopener' ); } } );
 				} );
-				actions.appendChild( login );
+				group.appendChild( login );
 				var isShared = -1 !== sharing.indexOf( site.name );
 				var shareBtn = iconButton( isShared ? 'stop' : 'share', isShared ? 'Stop sharing (public tunnel is up)' : 'Share publicly through a Cloudflare tunnel', isShared ? 'live' : '' );
 				shareBtn.addEventListener( 'click', function () {
 					shareBtn.disabled = true;
 					post( 'share', isShared ? { op: 'stop' } : { op: 'start', name: site.name } ).then( refresh );
 				} );
-				actions.appendChild( shareBtn );
+				group.appendChild( shareBtn );
 			}
 			tbody.appendChild( el( 'tr', {}, [
 				nameCell,

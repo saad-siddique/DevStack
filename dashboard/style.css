@@ -115,7 +115,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 	.nav { flex-direction: row; overflow-x: auto; }
 	.rail-foot { display: none; }
 	.content { padding: 20px 16px 36px; }
-	table.sites th:nth-child(5), table.sites td:nth-child(5) { display: none; }
 	.filter input { min-width: 0; width: 100%; }
 }
 
@@ -171,8 +170,6 @@ pre.log .empty-log { color: var(--muted); font-family: inherit; }
 .sites .meta .size { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sites .meta .badge { margin: 0; }
 .sites .actions { white-space: nowrap; text-align: right; }
-.sites .actions a, .sites .actions .linkish { margin-left: 12px; font-size: 13px; text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--accent) 50%, transparent); }
-.sites .actions .linkish.live { color: var(--on); border-bottom-color: color-mix(in srgb, var(--on) 50%, transparent); }
 .sites th.actions-col { text-align: right; }
 .panel-head .sort { display: inline-flex; gap: 2px; margin-left: 12px; padding: 2px; background: var(--chip); border-radius: 7px; }
 .panel-head .sort .th-sort { border: 0; padding: 3px 9px; border-radius: 5px; font-size: 12px; color: var(--muted); }
@@ -190,3 +187,24 @@ pre.log .empty-log { color: var(--muted); font-family: inherit; }
 .sites .meta .size { font-size: 11.5px; }
 .sites .name .title a { font-size: 14px; }
 .sites .star { font-size: 13px; margin-right: 6px; }
+
+/* The Actions cell must stay a table cell: the generic .actions rule above (service tiles) made it a flex box, so
+   its border stopped lining up with the rest of the row. */
+table.sites td.actions { display: table-cell; white-space: nowrap; text-align: right; vertical-align: middle; }
+table.sites td.actions .ic-group { display: inline-flex; gap: 2px; align-items: center; }
+.sites .meta .badge.fatals, .sites .meta .badge.cache { margin-left: 0; }
+
+/* Narrow screens: each site becomes a block; folder and actions stack under the name. */
+@media (max-width: 760px) {
+	table.sites, table.sites tbody, table.sites tr, table.sites td, table.sites td.actions { display: block; }
+	table.sites thead { display: none; }
+	table.sites tbody tr { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+	table.sites tbody tr:last-child { border-bottom: 0; }
+	table.sites tbody tr:hover td { background: transparent; }
+	table.sites td { padding: 0; border: 0; }
+	table.sites td.folder { max-width: none; white-space: normal; word-break: break-all; font-size: 12px; margin-top: 4px; }
+	table.sites td.actions { text-align: left; margin: 6px 0 0 -6px; }
+	.panel-head { align-items: center; }
+	.panel-head .filter { flex-basis: 100%; }
+	.panel-head .filter input { width: 100%; }
+}
