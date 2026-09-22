@@ -22,6 +22,15 @@ log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 run() { if [ "1" = "$DRY" ]; then log "DRY: $*"; else "$@"; fi; }
 
+# valet <args> : see bootstrap.sh; goes through sudo -n when trusted so it works without a TTY.
+valet() {
+	if sudo -n -l "$VALET_BIN" > /dev/null 2>&1; then
+		sudo -n USER="$USER" --preserve-env "$VALET_BIN" "$@"
+	else
+		"$VALET_BIN" "$@"
+	fi
+}
+
 # site_row <host> : load one inventory row into SITE_* variables.
 site_row() {
 	local row

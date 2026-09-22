@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# migrate-site <host> [--json] [--dry-run] [--i-have-a-backup]
+# One MAMP host -> https://<host>.test on Valet + mysql@8.4. Idempotent: re-running is a no-op.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+HOST="" ; JSON=0 ; BACKUP_FLAG=0
+for arg in "$@"; do
+	case "$arg" in
+		--json) JSON=1 ;;
+		--dry-run) DRY=1 ;;
+		--i-have-a-backup) BACKUP_FLAG=1 ;;
+		--*) die "unknown flag $arg" ;;
+		*) HOST="$arg" ;;
+	esac
+done
+[ -n "$HOST" ] || die "usage: migrate-site <host> [--json] [--dry-run] [--i-have-a-backup]"
+
+site_row "$HOST"
+[ -d "$SITE_PATH" ] || die "folder missing: $SITE_PATH"
+if [ "yes" = "$SITE_PROTECTED" ] && [ "1" != "$BACKUP_FLAG" ]; then
+	die "$SITE_HOST is a PROTECTED site (handoff 6.1). Take and verify a fresh backup, then re-run with --i-have-a-backup."
+fi
+mkdir -p "$LOG_DIR"
+exec 2> >(tee -a "$LOG_DIR/$SITE_HOST.log" >&2)
+log "=== migrate-site $SITE_HOST ($SITE_FOLDER, $SITE_PHP, db=$SITE_DB) DRY=$DRY"
+
+# 1. Link (explicit, never parked).
+step_link=skipped
+if [ ! -L "$VALET_HOME/Sites/$SITE_HOST" ]; then
+	( cd "$SITE_PATH" && run valet link "$SITE_HOST" )
+	step_link=linked
+fi
+log "link: $step_link"
+
+# 2. Per-site PHP: .valetrc for `valet php`, isolate for FPM.
+step_isolate=default
+if [ "$SITE_PHP" != "$DEFAULT_PHP" ]; then
+	if [ "$(cat "$SITE_PATH/.valetrc" 2> /dev/null)" != "php=$SITE_PHP" ]; then
+		[ "1" = "$DRY" ] || printf 'php=%s\n' "$SITE_PHP" > "$SITE_PATH/.valetrc"
+	fi
+	if valet isolated 2> /dev/null | grep -q "^| *$SITE_HOST "; then
+		step_isolate="already $SITE_PHP"
+	else
+		run valet isolate "$SITE_PHP" --site="$SITE_HOST"
+		step_isolate="isolated $SITE_PHP"
+	fi
+fi
+log "php: $step_isolate"
+
+# 3. HTTPS.
+step_secure=already
+if [ ! -f "$VALET_HOME/Certificates/$SITE_HOST.$TLD.crt" ]; then
+	run valet secure "$SITE_HOST"
+	step_secure=secured
+fi
+log "https: $step_secure"
+
+# Non-WordPress sites stop here.
+if [ "-" = "$SITE_DB" ] || [ ! -f "$SITE_PATH/wp-config.php" ]; then
+	log "not a WordPress site; done"
+	[ "1" = "$JSON" ] && jq -n --arg host "$SITE_HOST" --arg url "$SITE_URL" '{host:$host,url:$url,type:"non-wp",ok:true}'
+	exit 0
+fi
+
+wp() { wp_site "$SITE_PHP" "$SITE_PATH" "$@"; }
+
+# 4. Database: copy MAMP -> mysql@8.4 once; recreate the site's DB user.
+step_db=already
+if [ "0" = "$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$(sql_quote "$SITE_DB")'")" ]; then
+	dump="$LOG_DIR/$SITE_DB.$(date +%Y%m%d-%H%M%S).sql"
+	if [ "1" = "$DRY" ]; then
+		log "DRY: mysqldump $SITE_DB -> $dump ; mysql < $dump"
+	else
+		mysqldump_old --single-transaction --routines --triggers --default-character-set=utf8mb4 --databases "$SITE_DB" > "$dump"
+		mysql_new < "$dump"
+		old_n="$(mysql_old -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$SITE_DB'")"
+		new_n="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$SITE_DB'")"
+		[ "$old_n" = "$new_n" ] || die "table count mismatch after import: MAMP=$old_n new=$new_n"
+		step_db="imported $new_n tables"
+	fi
+fi
+log "db: $step_db"
+
+db_user="$(wp config get DB_USER)"
+db_pass="$(wp config get DB_PASSWORD)"
+u="$(sql_quote "$db_user")"; p="$(sql_quote "$db_pass")"; d="$(printf '%s' "$SITE_DB" | sed 's/`/``/g')"
+run mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
+log "db user: $db_user ensured"
+
+# 5. DB_HOST -> 127.0.0.1 (must happen BEFORE search-replace, or WP-CLI would edit MAMP's copy).
+step_dbhost=already
+if [ "127.0.0.1" != "$(wp config get DB_HOST)" ]; then
+	run wp config set DB_HOST 127.0.0.1 --quiet
+	step_dbhost="set 127.0.0.1"
+fi
+log "DB_HOST: $step_dbhost"
+[ "1" = "$DRY" ] || wp db check --quiet > /dev/null || die "WordPress cannot reach $SITE_DB on 127.0.0.1"
+
+# 6. URLs.
+is_ms="$(wp config get MULTISITE 2> /dev/null || echo 0)"
+sr_flags=(--all-tables --skip-columns=guid --report-changed-only --quiet)
+[ "1" = "$is_ms" ] && sr_flags+=(--network --url="$SITE_URL")
+run wp search-replace "https://$SITE_HOST:8890" "$SITE_URL" "${sr_flags[@]}"
+run wp search-replace "http://$SITE_HOST:8888"  "$SITE_URL" "${sr_flags[@]}"
+run wp search-replace "$SITE_HOST:8890"         "$SITE_HOST.$TLD" "${sr_flags[@]}"
+if [ "1" = "$is_ms" ]; then
+	run wp config set DOMAIN_CURRENT_SITE "$SITE_HOST.$TLD" --quiet
+	if [ "1" != "$(wp config get SUBDOMAIN_INSTALL 2> /dev/null || echo 0)" ]; then
+		run cp "$REPO_DIR/drivers/LocalValetDriver-multisite-subdir.php" "$SITE_PATH/LocalValetDriver.php"
+	fi
+fi
+run wp cache flush --quiet 2> /dev/null || true
+log "urls: -> $SITE_URL"
+
+# 7. Local SSL mu-plugin.
+mkdir -p "$SITE_PATH/wp-content/mu-plugins"
+if ! cmp -s "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$SITE_PATH/wp-content/mu-plugins/uo-local-ssl.php"; then
+	run cp "$REPO_DIR/mu-plugins/uo-local-ssl.php" "$SITE_PATH/wp-content/mu-plugins/uo-local-ssl.php"
+fi
+log "mu-plugin: uo-local-ssl.php in place"
+
+# 8. Smoke tests. /usr/bin/curl uses the keychain, so no -k: a cert-trust failure shows up as 000.
+if [ "1" = "$DRY" ]; then log "DRY: smoke skipped"; exit 0; fi
+code4="$(/usr/bin/curl -4 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
+code6="$(/usr/bin/curl -6 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
+login="$(/usr/bin/curl -s "$SITE_URL/wp-login.php" | grep -c 'loginform' || true)"
+siteurl="$(wp option get siteurl)"
+powered="$(/usr/bin/curl -sI "$SITE_URL/" | awk 'tolower($1)=="x-powered-by:"{print $2}' | tr -d '\r')"
+loop="$(wp eval 'echo is_wp_error( wp_remote_get( home_url( "/wp-json/" ) ) ) ? "ERR" : "OK";')"
+ok=true
+[ "200" = "$code4" ] && [ "200" = "$code6" ] && [ "$login" -ge 1 ] && [ "$siteurl" = "$SITE_URL" ] && [ "OK" = "$loop" ] || ok=false
+log "smoke: ipv4=$code4 ipv6=$code6 login=$login siteurl=$siteurl fpm=$powered loopback=$loop ok=$ok"
+if [ "1" = "$JSON" ]; then
+	jq -n --arg host "$SITE_HOST" --arg url "$SITE_URL" --arg php "$SITE_PHP" --arg fpm "$powered" \
+		--arg link "$step_link" --arg isolate "$step_isolate" --arg secure "$step_secure" --arg db "$step_db" --arg dbhost "$step_dbhost" \
+		--argjson ipv4 "$code4" --argjson ipv6 "$code6" --argjson login "$login" --arg siteurl "$siteurl" --arg loopback "$loop" --argjson ok "$ok" \
+		'{host:$host,url:$url,php:$php,fpm:$fpm,steps:{link:$link,isolate:$isolate,secure:$secure,db:$db,db_host:$dbhost},smoke:{ipv4:$ipv4,ipv6:$ipv6,login_form:$login,siteurl:$siteurl,loopback:$loopback},ok:$ok}'
+fi
+[ "true" = "$ok" ]

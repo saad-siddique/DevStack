@@ -15,6 +15,16 @@ log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m ✓ \033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m ! \033[0m %s\n' "$*"; }
 
+# valet <args> : Valet's wrapper re-execs itself via sudo; without a TTY that prompt cannot be answered.
+# Once `valet trust` has run, go through sudo -n directly (same command the wrapper would run).
+valet() {
+	if sudo -n -l "$VALET_BIN" > /dev/null 2>&1; then
+		sudo -n USER="$USER" --preserve-env "$VALET_BIN" "$@"
+	else
+		"$VALET_BIN" "$@"
+	fi
+}
+
 ensure_brew() {
 	command -v brew > /dev/null || { echo "Homebrew missing: https://brew.sh"; exit 1; }
 	xcode-select -p > /dev/null 2>&1 || { echo "Xcode / Command Line Tools missing"; exit 1; }
@@ -91,19 +101,19 @@ ensure_valet() {
 	# /etc/resolver/test is written by the last-but-one install step (dnsmasq); its absence means an incomplete install.
 	if [ ! -f "$VALET_HOME/config.json" ] || [ ! -f /etc/resolver/test ]; then
 		warn "valet install (asks for sudo unless already trusted)"
-		"$VALET_BIN" install
+		valet install
 	fi
 	if [ ! -f /etc/sudoers.d/valet ]; then
 		warn "valet trust needs your sudo password (once)"
-		"$VALET_BIN" trust
+		valet trust
 	fi
 	ok "valet $("$VALET_BIN" --version | awk '{print $NF}') installed and trusted"
 	add_ipv6_listen "$BREW_PREFIX/etc/nginx/valet/valet.conf"
 	local f
 	for f in "$VALET_HOME"/Nginx/*; do add_ipv6_listen "$f"; done
-	"$VALET_BIN" use "$DEFAULT_PHP" --force > /dev/null
+	valet use "$DEFAULT_PHP" --force > /dev/null
 	ok "default PHP $DEFAULT_PHP"
-	"$VALET_BIN" restart > /dev/null
+	valet restart > /dev/null
 }
 
 ensure_services() {
@@ -123,9 +133,9 @@ ensure_services() {
 ensure_dashboard() {
 	log "Dashboard"
 	if [ ! -L "$VALET_HOME/Sites/dashboard" ]; then
-		( cd "$REPO_DIR/dashboard" && "$VALET_BIN" link dashboard > /dev/null )
+		( cd "$REPO_DIR/dashboard" && valet link dashboard > /dev/null )
 	fi
-	[ -f "$VALET_HOME/Certificates/dashboard.test.crt" ] || "$VALET_BIN" secure dashboard > /dev/null
+	[ -f "$VALET_HOME/Certificates/dashboard.test.crt" ] || valet secure dashboard > /dev/null
 	ok "https://dashboard.test"
 }
 
