@@ -59,8 +59,9 @@ log "https: $step_secure"
 if [ "-" = "$SITE_DB" ] || [ ! -f "$SITE_PATH/wp-config.php" ]; then
 	code4="000"; code6="000"
 	if [ "1" != "$DRY" ]; then
-		code4="$(/usr/bin/curl -4 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
-		code6="$(/usr/bin/curl -6 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
+		wait_for_site "$SITE_URL"
+		code4="$(/usr/bin/curl -4 -s -o /dev/null -m 10 -w '%{http_code}' "$SITE_URL/" || true)"
+		code6="$(/usr/bin/curl -6 -s -o /dev/null -m 10 -w '%{http_code}' "$SITE_URL/" || true)"
 	fi
 	log "not a WordPress site; linked + secured (ipv4=$code4 ipv6=$code6)"
 	[ "1" = "$JSON" ] && jq -n --arg host "$SITE_HOST" --arg url "$SITE_URL" --arg link "$step_link" --arg secure "$step_secure" \
@@ -121,6 +122,14 @@ if [ "1" = "$is_ms" ]; then
 		run cp "$REPO_DIR/drivers/LocalValetDriver-multisite-subdir.php" "$SITE_PATH/LocalValetDriver.php"
 	fi
 fi
+for const in WP_HOME WP_SITEURL; do
+	cur="$(wp config get "$const" 2> /dev/null || true)"
+	case "$cur" in
+		*"$SITE_HOST:8890"*|*"$SITE_HOST:8888"*)
+			run wp config set "$const" "$SITE_URL" --quiet
+			log "wp-config: $const -> $SITE_URL" ;;
+	esac
+done
 run wp cache flush --quiet 2> /dev/null || true
 log "urls: -> $SITE_URL"
 
@@ -133,14 +142,15 @@ log "mu-plugin: uo-local-ssl.php in place"
 
 # 8. Smoke tests. /usr/bin/curl uses the keychain, so no -k: a cert-trust failure shows up as 000.
 if [ "1" = "$DRY" ]; then log "DRY: smoke skipped"; exit 0; fi
-code4="$(/usr/bin/curl -4 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
-code6="$(/usr/bin/curl -6 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
-login="$(/usr/bin/curl -s "$SITE_URL/wp-login.php" | grep -c 'loginform' || true)"
-siteurl="$(wp option get siteurl)"
-powered="$(/usr/bin/curl -sI "$SITE_URL/" | awk 'tolower($1)=="x-powered-by:"{print $2}' | tr -d '\r')"
-loop="$(wp eval 'echo is_wp_error( wp_remote_get( home_url( "/wp-json/" ) ) ) ? "ERR" : "OK";')"
+wait_for_site "$SITE_URL"
+code4="$(/usr/bin/curl -4 -s -o /dev/null -m 10 -w '%{http_code}' "$SITE_URL/" || true)"
+code6="$(/usr/bin/curl -6 -s -o /dev/null -m 10 -w '%{http_code}' "$SITE_URL/" || true)"
+login="$(/usr/bin/curl -s -m 10 "$SITE_URL/wp-login.php" | grep -c 'loginform' || true)"   # informational: login-URL plugins move it
+siteurl="$(wp option get siteurl 2> /dev/null | tail -1 | sed 's#/$##')"
+powered="$(/usr/bin/curl -sI -m 10 "$SITE_URL/" | awk 'tolower($1)=="x-powered-by:"{print $2}' | tr -d '\r' || true)"
+loop="$(wp eval 'echo is_wp_error( wp_remote_get( home_url( "/wp-json/" ) ) ) ? "ERR" : "OK";' 2> /dev/null | tail -1)"
 ok=true
-[ "200" = "$code4" ] && [ "200" = "$code6" ] && [ "$login" -ge 1 ] && [ "$siteurl" = "$SITE_URL" ] && [ "OK" = "$loop" ] || ok=false
+[ "200" = "$code4" ] && [ "200" = "$code6" ] && [ "$siteurl" = "$SITE_URL" ] && [ "OK" = "$loop" ] || ok=false
 log "smoke: ipv4=$code4 ipv6=$code6 login=$login siteurl=$siteurl fpm=$powered loopback=$loop ok=$ok"
 if [ "1" = "$JSON" ]; then
 	jq -n --arg host "$SITE_HOST" --arg url "$SITE_URL" --arg php "$SITE_PHP" --arg fpm "$powered" \

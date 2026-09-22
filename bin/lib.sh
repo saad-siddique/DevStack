@@ -31,6 +31,16 @@ valet() {
 	fi
 }
 
+# wait_for_site <url> : poll until nginx+php-fpm answer with something other than 000/502/503/504 (max ~15s).
+wait_for_site() {
+	local i code
+	for i in $(seq 1 15); do
+		code="$(/usr/bin/curl -4 -s -o /dev/null -m 5 -w '%{http_code}' "$1/" || true)"
+		case "$code" in 000|502|503|504) sleep 1 ;; *) return 0 ;; esac
+	done
+	log "warning: $1 still answering $code after 15s"
+}
+
 # site_row <host> : load one inventory row into SITE_* variables.
 site_row() {
 	local row
@@ -51,7 +61,7 @@ php_bin() { printf '%s/opt/%s/bin/php\n' "$BREW_PREFIX" "$1"; }
 wp_site() {
 	local php="$1" path="$2"
 	shift 2
-	"$(php_bin "$php")" "$BREW_PREFIX/bin/wp" --path="$path" --skip-plugins --skip-themes "$@"
+	"$(php_bin "$php")" -d display_errors=stderr "$BREW_PREFIX/bin/wp" --path="$path" --skip-plugins --skip-themes "$@"
 }
 
 mysql_new()     { "$BREW_PREFIX/opt/mysql@8.4/bin/mysql" -uroot "$@"; }
