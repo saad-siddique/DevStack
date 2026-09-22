@@ -64,6 +64,10 @@ ensure_php_ini() {
 	log "PHP conf.d drop-ins"
 	local v dst
 	for v in "${PHP_VERSIONS[@]}"; do
+		# A hand-made ext-redis.ini (pre-tap pecl build) double-loads redis once the tap's 20-redis.ini exists.
+		if [ -f "$BREW_PREFIX/etc/php/$v/conf.d/20-redis.ini" ] && [ -f "$BREW_PREFIX/etc/php/$v/conf.d/ext-redis.ini" ]; then
+			rm "$BREW_PREFIX/etc/php/$v/conf.d/ext-redis.ini"; ok "PHP $v: removed duplicate ext-redis.ini (tap build takes over)"
+		fi
 		dst="$BREW_PREFIX/etc/php/$v/conf.d/zz-uo-dev.ini"
 		[ -d "$(dirname "$dst")" ] || { warn "no conf.d for PHP $v (formula not installed?)"; continue; }
 		if ! cmp -s "$REPO_DIR/php/zz-uo-dev.ini" "$dst"; then
@@ -190,10 +194,12 @@ ensure_services() {
 	ok "mysql@8.4 $(brew services list | awk '$1=="mysql@8.4"{print $2}')"
 	brew services start memcached > /dev/null 2>&1 || true
 	ok "memcached $(brew services list | awk '$1=="memcached"{print $2}')"
-	local rowner
-	rowner="$(lsof -nP -iTCP:6379 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"
-	if [ -n "$rowner" ] && [ "redis-ser" != "${rowner:0:9}" ]; then
-		warn "port 6379 is held by $rowner (Docker?) — Homebrew redis not started; stop that container or run: bin/service redis start"
+	if [ "started" = "$(brew services list | awk '$1=="redis"{print $2}')" ]; then
+		ok "redis started"
+	elif lsof -nP -iTCP:6379 -sTCP:LISTEN 2> /dev/null | awk 'NR>1{print $1}' | /usr/bin/grep -q '^com\.docke'; then
+		# Homebrew's redis binds 127.0.0.1 and can coexist with Docker's *:6379, so try anyway and report honestly.
+		brew services start redis > /dev/null 2>&1 || true
+		if [ "started" = "$(brew services list | awk '$1=="redis"{print $2}')" ]; then ok "redis started (beside a Docker redis on *:6379)"; else warn "redis could not start: port 6379 is held by a Docker container"; fi
 	else
 		brew services start redis > /dev/null 2>&1 || true
 		ok "redis $(brew services list | awk '$1=="redis"{print $2}')"

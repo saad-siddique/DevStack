@@ -5,8 +5,8 @@ Laravel Valet + Homebrew PHP (8.4 default, 7.4 for compatibility sites) + `mysql
 plus the scripts that migrate sites off MAMP PRO and, later, a small menu-bar app that drives the same scripts.
 
 **Status (2026-09-22):** All 24 hosts on Valet; MAMP PRO stopped and backed out of the system (apps kept for now).
-PHP 7.4 and every 8.x (8.0–8.6) are installed; php-fpm runs only for versions a site uses (8.4 default, 7.4 for three
-sites). Redis and Memcached run as brew services.
+PHP 7.4 and every 8.x (8.0–8.6) are installed, each with redis, imagick, memcached and Xdebug (off) extensions;
+php-fpm runs only for versions a site uses (8.4 default, 7.4 for three sites). Redis and Memcached run as brew services.
 Phase 5 tooling built: `site-new`, `site-import` (LocalWP exports), `site-remove`, `php-xdebug`, `service`, phpMyAdmin
 at `https://phpmyadmin.test` (auto-login as root), and a dashboard at `https://dashboard.test` that shows services,
 sites and PHP versions and can start/stop services and toggle Xdebug. Not built yet: the `app/` menu-bar app.
