@@ -99,7 +99,7 @@ ensure_phpmyadmin() {
 		unzip -q "$tmp/pma.zip" -d "$tmp/x"
 		mkdir -p "$(dirname "$PMA_DIR")"; rm -rf "$PMA_DIR"
 		mv "$tmp"/x/phpMyAdmin-* "$PMA_DIR"; rm -rf "$tmp"
-		ok "downloaded $(sed -nE "s/.*'PMA_VERSION', '([^']+)'.*/\1/p" "$PMA_DIR/libraries/classes/Version.php" 2> /dev/null | head -1 || echo phpMyAdmin)"
+		ok "downloaded phpMyAdmin $(sed -nE "s/.*VERSION = '([^']+)'.*/\1/p" "$PMA_DIR/libraries/classes/Version.php" 2> /dev/null | head -1)"
 	fi
 	mkdir -p "$PMA_DIR/tmp"
 	if [ ! -f "$PMA_DIR/config.inc.php" ]; then

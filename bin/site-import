@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# site-import <name> <source> [--sql file.sql] [--php 8.4|7.4] [--json]
+# <source>: a LocalWP export .zip, any .zip holding a WordPress root, or a folder. The WordPress root is the
+# directory containing wp-config.php; the database dump is --sql or the largest *.sql found in the source.
+# Result: https://<name>.test with its own database (wp_<name>), DB user, DB_HOST 127.0.0.1, URLs rewritten, HTTPS.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+NAME="" ; SRC="" ; SQL="" ; PHPV="$DEFAULT_PHP" ; JSON=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--sql) SQL="$2"; shift ;; --sql=*) SQL="${1#--sql=}" ;;
+		--php) PHPV="$2"; shift ;; --php=*) PHPV="${1#--php=}" ;;
+		--json) JSON=1 ;;
+		--*) die "unknown flag $1" ;;
+		*) if [ -z "$NAME" ]; then NAME="$1"; else SRC="$1"; fi ;;
+	esac
+	shift
+done
+[ -n "$NAME" ] && [ -n "$SRC" ] || die "usage: site-import <name> <export.zip|folder> [--sql dump.sql] [--php 8.4|7.4] [--json]"
+[[ "$NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "name must be lowercase letters, digits and dashes"
+case "$PHPV" in php@*) ;; *) PHPV="php@$PHPV" ;; esac
+[ -e "$SRC" ] || die "source not found: $SRC"
+SITE_PATH="$SITES_DIR/$NAME"; URL="https://$NAME.$TLD"
+[ ! -e "$SITE_PATH" ] || die "$SITE_PATH already exists"
+[ ! -L "$VALET_HOME/Sites/$NAME" ] || die "Valet already has a site named $NAME"
+mkdir -p "$LOG_DIR"; exec 2> >(tee -a "$LOG_DIR/site-import-$NAME.log" >&2)
+log "=== site-import $NAME from $SRC ($PHPV)"
+
+# 1. Unpack (zip) or use the folder as-is.
+WORK="$SRC"; TMP=""
+if [ -f "$SRC" ] && [[ "$SRC" == *.zip ]]; then
+	TMP="$(mktemp -d)"; log "unzipping to $TMP"
+	unzip -q "$SRC" -d "$TMP"; WORK="$TMP"
+fi
+trap '[ -n "$TMP" ] && rm -rf "$TMP"' EXIT
+
+# 2. Locate the WordPress root and the SQL dump.
+WP_ROOT="$(find "$WORK" -maxdepth 4 -name wp-config.php -not -path '*/node_modules/*' 2> /dev/null | head -1 | xargs -I{} dirname {} || true)"
+[ -n "$WP_ROOT" ] || WP_ROOT="$(find "$WORK" -maxdepth 4 -name wp-settings.php 2> /dev/null | head -1 | xargs -I{} dirname {} || true)"
+[ -n "$WP_ROOT" ] || die "no WordPress root (wp-config.php / wp-settings.php) found under $SRC"
+if [ -z "$SQL" ]; then SQL="$(find "$WORK" -maxdepth 4 -name '*.sql' 2> /dev/null | xargs -I{} stat -f '%z %N' {} 2> /dev/null | sort -rn | head -1 | cut -d' ' -f2- || true)"; fi
+[ -n "$SQL" ] && [ -f "$SQL" ] || die "no .sql dump found (pass --sql file.sql)"
+log "wordpress root: $WP_ROOT"; log "sql dump: $SQL ($(du -h "$SQL" | cut -f1))"
+
+# 3. Files.
+mkdir -p "$SITE_PATH"
+rsync -a --exclude 'node_modules' "$WP_ROOT/" "$SITE_PATH/"
+[ -f "$SITE_PATH/wp-config.php" ] || { cp "$SITE_PATH/wp-config-sample.php" "$SITE_PATH/wp-config.php"; }
+wp() { wp_site "$PHPV" "$SITE_PATH" "$@"; }
+log "files copied to $SITE_PATH"
+
+# 4. Database: fresh schema named after the site, user from wp-config (or a new one), import with --force.
+DB_NAME="$(db_name_for "$NAME")"
+DB_USER="$(wp config get DB_USER 2> /dev/null || true)"; DB_PASS="$(wp config get DB_PASSWORD 2> /dev/null || true)"
+if [ -z "$DB_USER" ] || [ "root" = "$DB_USER" ]; then DB_USER="$DB_NAME"; DB_PASS="$(random_secret 20)"; fi
+[ -n "$DB_PASS" ] || DB_PASS="$(random_secret 20)"
+mysql_new -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
+db_ensure_user "$DB_NAME" "$DB_USER" "$DB_PASS"
+# LocalWP dumps may carry CREATE DATABASE/USE for their own schema name; strip so everything lands in $DB_NAME.
+sed -E '/^(CREATE DATABASE|USE )/d' "$SQL" | mysql_new --force "$DB_NAME"
+n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$DB_NAME' AND TABLE_TYPE='BASE TABLE'")"
+[ "$n_tables" -gt 0 ] || die "import produced no tables"
+log "db: $DB_NAME ($n_tables tables), user $DB_USER"
+
+# 5. wp-config: point at the new database, drop hard-coded URL constants.
+wp config set DB_NAME "$DB_NAME" --quiet
+wp config set DB_USER "$DB_USER" --quiet
+wp config set DB_PASSWORD "$DB_PASS" --quiet
+wp config set DB_HOST 127.0.0.1 --quiet
+for const in WP_HOME WP_SITEURL; do wp config has "$const" 2> /dev/null && wp config delete "$const" --quiet && log "wp-config: removed $const"; done
+wp db check --quiet > /dev/null || die "WordPress cannot reach $DB_NAME"
+
+# 6. URLs: old siteurl from the dump -> https://<name>.test (both schemes, bare host too).
+prefix="$(wp config get table_prefix 2> /dev/null || echo wp_)"
+old_url="$(mysql_new -N -e "SELECT option_value FROM \`$DB_NAME\`.\`${prefix}options\` WHERE option_name='siteurl' LIMIT 1" 2> /dev/null | sed 's#/$##')"
+if [ -n "$old_url" ] && [ "$old_url" != "$URL" ]; then
+	old_host="$(printf '%s' "$old_url" | sed -E 's#^https?://##')"
+	sr=(--all-tables --skip-columns=guid --report-changed-only --quiet)
+	wp search-replace "https://$old_host" "$URL" "${sr[@]}"
+	wp search-replace "http://$old_host"  "$URL" "${sr[@]}"
+	wp search-replace "//$old_host"       "//$NAME.$TLD" "${sr[@]}"
+	log "urls: $old_url -> $URL"
+else
+	log "urls: already $URL"
+fi
+wp cache flush --quiet 2> /dev/null || true
+
+# 7. Link, isolate, secure, mu-plugin, smoke.
+site_finalize "$NAME" "$SITE_PATH" "$PHPV" || true
+if [ "1" = "$JSON" ]; then
+	jq -n --arg name "$NAME" --arg url "$URL" --arg php "$PHPV" --arg path "$SITE_PATH" --arg db "$DB_NAME" --arg dbuser "$DB_USER" --arg old "$old_url" --argjson tables "$n_tables" --argjson smoke "$SMOKE_JSON" \
+		'{name:$name,url:$url,php:$php,path:$path,db:$db,db_user:$dbuser,tables:$tables,imported_from:$old,smoke:$smoke,ok:$smoke.ok}'
+else
+	echo "$URL  (db $DB_NAME, $n_tables tables, from $old_url)"
+fi
+[ "true" = "$(jq -r .ok <<<"$SMOKE_JSON")" ]
