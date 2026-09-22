@@ -78,6 +78,7 @@ The icon gains an exclamation badge when a core service is down or launchd repor
   update, upgrade), a core service going down, a watchdog restart, a new crash or resource report, an overnight
   upgrade, an update becoming available.
 - **⌃⌥D** opens the panel from anywhere. *Previous tasks* in the task window shows the last 20 logs.
+- *Show load graph in the menu bar* (⋯ menu) draws a small CPU sparkline next to the icon, sampled every 15 s.
 - Quick-open: **Dashboard** (`https://dashboard.test`), **phpMyAdmin** (every database, signed in as root) and
   **Mailpit** with the count of caught mails.
 - **Stack load**: CPU and memory of the stack's own processes (php-fpm, nginx, mysqld, redis, memcached, mailpit,
@@ -100,6 +101,9 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Log in to wp-admin | Key icon on its row. A one-time link signs you in as the first administrator; nothing to type. |
 | Back up a site | ⋯ → Back up now. Files are cloned and the database dumped into `~/Backups/DevStack/<site>/<stamp>/`. |
 | Archive a site | ⋯ → Archive (back up, then remove)…. A verbatim backup is taken and kept, then the site is removed. Tick *Compress the files* when you want the disk space back (see Backups below). Protected sites cannot be archived. |
+| Share a site publicly | ⋯ → Share publicly. A Cloudflare tunnel opens: the hostname from your `~/.cloudflared/config.yml` when a rule points at the site, otherwise a random `trycloudflare.com` URL. The URL is copied and opened; a line in the panel shows it with Stop. The site answers under that hostname (a mu-plugin adjusts home/siteurl for tunnel requests), so webhooks and remote testers work. |
+| Save and roll back a database | ⋯ → Save point (database), seconds. In Backups… a save point has **Roll back database**: drop, recreate, import, files untouched. |
+| Object cache | ⋯ → Object cache → Redis / Memcached / Off. Installs the plugin and drop-in with a per-site key prefix, so sites sharing one Redis never collide; the row shows "redis cache". |
 | Pin the sites you use daily | ⋯ → Add to favourites. Favourites show a ★ and always sort first, whatever the sort; the dashboard has the same star in the Site column. |
 | See what a site costs | Each row shows folder + database size; the Size sort puts the biggest first; the line under the list has the totals and a *Measure* button (folders are walked nightly, databases are live). |
 | Restore a site | ⋯ → Restore from backup…, or ⋯ menu → Backups…. Restore recreates it exactly: same address, PHP version, database name and logins. If the site still exists you are asked to replace it (a safety backup is taken first). |
@@ -115,6 +119,11 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | See what went wrong | Every long task streams its log into the task window; *Copy log* copies it. Stack logs are on the dashboard's Logs tab. |
 
 ![New site](docs/img/new-site.png) ![Task log](docs/img/task.png)
+
+**Look.** Light mode is "Glass": translucent cards on a cool gradient, a teal hero carrying the stack glyph and the
+live CPU figure, letter tiles per site, rounded numerals. Dark mode is "Console": graphite cards, glowing green LEDs,
+a light-teal accent. Both follow the system appearance; the dashboard uses the same palettes. The three directions
+that were considered are kept at `https://dashboard.test/design/`.
 
 **How it works.** The app never talks to brew, Valet or MySQL itself. Every button runs the same `devstack …`
 command you could type, and reads its `--json` output, so the two never disagree. It reads status once a minute
@@ -160,6 +169,11 @@ devstack backups --prune --keep 5                # delete older backups (the new
 devstack archive myplugin [--compress]           # verbatim backup, then remove the site; --compress really frees the disk
 devstack sizes [--refresh]                       # disk per site folder (the nightly run refreshes; --refresh walks now)
 devstack favorite myplugin [on|off]              # pin a site to the top of the Sites list, in the app and on the dashboard
+devstack share myplugin | --stop                 # public URL through Cloudflare: your named tunnel if ~/.cloudflared maps one, else a quick one
+devstack cache myplugin redis|memcached|off      # persistent object cache for one site (per-site key prefix, shared servers)
+devstack backup myplugin --db-only --label "x"   # database save point; devstack restore myplugin --db-only rolls back to the newest
+devstack doctor --fix                            # start what is stopped, re-run bootstrap for gaps, check again
+devstack uninstall --yes [--purge]               # remove DevStack (sites, databases, backups stay)
 devstack restore myplugin [--replace]            # bring it back exactly as it was (same URL, PHP, database, logins)
 devstack clone myplugin myplugin-copy            # a copy under a new name: own database, URLs rewritten
 devstack remove myplugin --yes --backup          # same as archive, spelled out
@@ -237,6 +251,20 @@ checks that the host ends in `.test`, deletes the transient, compares hashes wit
 and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account; the default is
 the first administrator (the first super admin on multisite).
 
+## Sharing a site publicly
+
+`devstack share <site>` starts a Cloudflare tunnel detached and prints the URL. If `~/.cloudflared/config.yml` has an
+ingress rule whose `service` is `https://<site>.test`, the *named* tunnel runs and the URL is that stable hostname,
+which is what you want for webhooks you configure once at Zapier or Stripe. `devstack share <site> --hostname
+saad-wp.example.com` rewrites or adds that rule (pointing it at the site with `noTLSVerify` and the right host
+header) before starting. Without a mapping you get a quick tunnel: a random `*.trycloudflare.com` URL, no account.
+`--stop` ends it; `--status` and `devstack status` show it; the app and the dashboard show the URL with Stop.
+
+WordPress under a foreign hostname would normally redirect to its `.test` address. The `uo-local-share.php`
+mu-plugin, present in every site, filters `home`/`siteurl` to the request host when Cloudflare headers are present,
+marks the request HTTPS and disables canonical redirects, so pages, assets and REST callbacks all use the public URL.
+No per-developer `wp-config.php` block is needed any more.
+
 ## Backups, archive, restore, clone
 
 ⋯ → Back up now on a site row, or `devstack backup <site>`, writes `~/Backups/DevStack/<site>/<YYYYMMDD-HHMMSS>/` holding `files/` (an APFS clone of the
@@ -244,11 +272,13 @@ site folder: instant, and space-free until either side changes), `db.sql.gz` (`m
 cannot abort it) and `manifest.json` (name, PHP version, database, table count). A 260 MB site backs up in under
 three seconds.
 
-- **Archive** (`devstack archive <site>`, or ⋯ → Archive in the app) takes that backup, then removes the site. It
-  refuses to remove anything when the backup fails. The default backup is an APFS clone: instant, but it shares
-  blocks with the site, so once the site is deleted the clone holds the bytes and only the database space is freed.
-  `--compress` (the checkbox in the dialog) packs the files into `files.tar.zst` instead: minutes for a multi-gigabyte
-  folder, and the disk space really comes back. Restore and Import unpack it transparently.
+- **Archive** (`devstack archive <site>`, or ⋯ → Archive in the app) backs up, then removes the site. It refuses to
+  remove anything when the backup fails. Archive compresses by default (`files.tar.zst`, minutes for a multi-gigabyte
+  folder) because its point is to free the disk: an APFS clone would keep sharing blocks with the deleted site and
+  free only the database. `--no-compress` (untick the box) keeps the instant clone. Restore and Import unpack either.
+- **Save points** (`devstack backup <site> --db-only --label "before X"`, or ⋯ → Save point) are database-only
+  backups, a few hundred KB, seconds. `devstack restore <site> --db-only [--from DIR]` or **Roll back database** in
+  Backups… drops and rebuilds the database from one; files stay.
 - **Footprint**: `devstack status` carries each site's database size (live, from `information_schema`) and folder
   size (from `devstack sizes --refresh`, which the 03:30 run performs; a `du` over 80 GB takes minutes, so it is
   never done on a status read). The app's Sites tab and the dashboard's Disk column show the same numbers, sort by

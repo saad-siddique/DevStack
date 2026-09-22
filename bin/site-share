@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# site-share <name> [--hostname H] [--json]   |   site-share --stop [--json]   |   site-share --status [--json]
+# Public URL for a local site through Cloudflare:
+#   * a NAMED tunnel when ~/.cloudflared/config.yml already maps a hostname to https://<name>.test (stable URL, good
+#     for webhooks you configure once). --hostname H rewrites/creates that ingress rule for the site first.
+#   * otherwise a QUICK tunnel (random *.trycloudflare.com URL, no account).
+# The tunnel runs detached; state in $DATA_DIR/share.json (stack-status embeds it), log in $LOG_DIR/share.log.
+# The uo-local-share mu-plugin makes WordPress answer under the public hostname.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+CF="$BREW_PREFIX/bin/cloudflared"; CONF="$HOME/.cloudflared/config.yml"; STATE="$DATA_DIR/share.json"; SHARELOG="$LOG_DIR/share.log"
+NAME="" ; HOSTNAME_WANT="" ; OP="start" ; JSON=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--stop) OP=stop ;; --status) OP=status ;; --json) JSON=1 ;;
+		--hostname) HOSTNAME_WANT="$2"; shift ;; --hostname=*) HOSTNAME_WANT="${1#--hostname=}" ;;
+		--*) die "unknown flag $1" ;;
+		*) NAME="$1" ;;
+	esac
+	shift
+done
+mkdir -p "$DATA_DIR" "$LOG_DIR"
+
+state_pid() { [ -f "$STATE" ] && jq -r '.pid // empty' "$STATE" 2> /dev/null || true; }
+alive() { [ -n "$1" ] && kill -0 "$1" 2> /dev/null; }
+emit_status() {
+	local pid; pid="$(state_pid)"
+	if [ -f "$STATE" ] && alive "$pid"; then
+		if [ "1" = "$JSON" ]; then jq '. + {running:true}' "$STATE"; else jq -r '"sharing \(.sites | join(", ")) at \(.urls | join(", ")) (\(.mode) tunnel, pid \(.pid))"' "$STATE"; fi
+	else
+		[ -f "$STATE" ] && rm -f "$STATE"
+		if [ "1" = "$JSON" ]; then echo '{"running":false}'; else echo "not sharing"; fi
+	fi
+}
+
+case "$OP" in
+	status) emit_status; exit 0 ;;
+	stop)
+		pid="$(state_pid)"
+		if alive "$pid"; then kill "$pid" 2> /dev/null || true; sleep 1; alive "$pid" && kill -9 "$pid" 2> /dev/null || true; log "stopped tunnel (pid $pid)"; fi
+		rm -f "$STATE"
+		[ "1" = "$JSON" ] && echo '{"running":false,"ok":true}' || echo "sharing stopped"
+		exit 0 ;;
+esac
+
+[ -n "$NAME" ] || die "usage: site-share <name> [--hostname H] | --stop | --status"
+[ -x "$CF" ] || die "cloudflared missing: brew install cloudflared (bootstrap installs it)"
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+[ -n "$SITE_PATH" ] || die "unknown site '$NAME'"
+[ -f "$SITE_PATH/wp-config.php" ] && install_mu_plugins "$SITE_PATH"
+
+# Named tunnel: does config.yml map a hostname to this site?
+mapped_host=""
+if [ -f "$CONF" ]; then
+	if [ -n "$HOSTNAME_WANT" ]; then
+		# Rewrite (or add) the ingress rule for that hostname to point at the site. Keeps every other rule.
+		cp "$CONF" "$CONF.bak"
+		python3 - "$CONF" "$HOSTNAME_WANT" "$NAME" "$TLD" <<'PY'
+import re, sys
+path, host, name, tld = sys.argv[1:5]
+s = open(path).read()
+rule = f"""  # {name} (DevStack) — managed by devstack share
+  - hostname: {host}
+    service: https://{name}.{tld}
+    originRequest:
+      httpHostHeader: {name}.{tld}
+      originServerName: {name}.{tld}
+      noTLSVerify: true
+"""
+m = re.search(r"(  #[^\n]*\n)?  - hostname: " + re.escape(host) + r"\n(?:    .*\n|      .*\n)*", s)
+if m: s = s[:m.start()] + rule + s[m.end():]
+else:
+    i = s.find("  - service: http_status:404")
+    s = s[:i] + rule + s[i:] if i >= 0 else s.rstrip("\n") + "\n" + rule
+open(path, "w").write(s)
+PY
+		log "config.yml: $HOSTNAME_WANT -> https://$NAME.$TLD"
+		# The hostname must point at the tunnel in Cloudflare DNS; cloudflared creates the CNAME (no-op if it exists).
+		tunnel_name="$(awk '/^tunnel:/ { print $2; exit }' "$CONF")"
+		"$CF" tunnel route dns "$tunnel_name" "$HOSTNAME_WANT" > /dev/null 2>&1 && log "dns: $HOSTNAME_WANT -> tunnel $tunnel_name" || log "dns: could not add the CNAME automatically (already there, or run: cloudflared tunnel route dns $tunnel_name $HOSTNAME_WANT)"
+	fi
+	mapped_host="$(awk -v svc="https://$NAME.$TLD" '
+		/^  - hostname:/ { h=$3 }
+		/^    service:/ && $2 == svc { print h; exit }' "$CONF")"
+fi
+
+# One tunnel at a time: stop whatever runs.
+pid="$(state_pid)"; if alive "$pid"; then kill "$pid" 2> /dev/null || true; sleep 1; fi
+if [ -n "$mapped_host" ]; then
+	tunnel="$(awk '/^tunnel:/ { print $2; exit }' "$CONF")"
+	nohup "$CF" tunnel run "$tunnel" >> "$SHARELOG" 2>&1 &
+	pid=$!; mode=named; url="https://$mapped_host"
+	# every hostname the named tunnel serves whose service is a local .test site
+	sites="$(awk -v tld=".$TLD" '/^    service: https:\/\// { s=$2; sub("https://", "", s); if (s ~ tld"$") { sub(tld"$", "", s); print s } }' "$CONF" | jq -R . | jq -s 'unique')"
+	urls="$(awk '/^  - hostname:/ { h=$3 } /^    service: https:\/\/.*\.test$/ { print "https://" h }' "$CONF" | jq -R . | jq -s 'unique')"
+else
+	# --config /dev/null: without it cloudflared also loads ~/.cloudflared/config.yml, whose ingress catch-all (404) and
+	# credentials hijack the quick tunnel. http2 rather than QUIC, which many office networks block.
+	nohup "$CF" tunnel --config /dev/null --protocol http2 --url "https://$NAME.$TLD" --no-tls-verify --http-host-header "$NAME.$TLD" >> "$SHARELOG" 2>&1 &
+	pid=$!; mode=quick; url=""
+	for i in $(seq 1 40); do
+		url="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$SHARELOG" 2> /dev/null | tail -1 || true)"
+		[ -n "$url" ] && break; sleep 0.5
+	done
+	[ -n "$url" ] || { kill "$pid" 2> /dev/null; die "cloudflared gave no URL in 20 s (see $SHARELOG)"; }
+	log "quick tunnels can take a minute to answer (530 until then); for a stable URL use --hostname with your named tunnel"
+	sites="$(jq -n --arg n "$NAME" '[$n]')"; urls="$(jq -n --arg u "$url" '[$u]')"
+fi
+jq -n --arg mode "$mode" --argjson pid "$pid" --argjson sites "$sites" --argjson urls "$urls" --arg url "$url" --arg site "$NAME" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+	'{mode:$mode,pid:$pid,site:$site,url:$url,sites:$sites,urls:$urls,started:$at}' > "$STATE"
+log "sharing $NAME at $url ($mode tunnel, pid $pid)"
+if [ "1" = "$JSON" ]; then jq '. + {running:true,ok:true}' "$STATE"; else echo "$url"; fi

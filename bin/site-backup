@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# site-backup <name> [--out DIR] [--db-only|--files-only] [--compress] [--json]
+# site-backup <name> [--out DIR] [--db-only|--files-only] [--compress] [--label TEXT] [--json]
+#   --db-only + --label: a database save point ("before migration") to roll back to with `devstack restore --db-only`.
 #   --compress: files.tar.zst instead of an APFS clone. Slower (minutes per few GB) but the bytes really leave the
 #   disk once the site is removed; a clone shares blocks with the site and keeps them alive after removal.
 # site-backup --list [name] [--json]
@@ -12,11 +13,12 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/DevStack}"
-NAME="" ; OUT="$BACKUP_ROOT" ; DB=1 ; FILES=1 ; JSON=0 ; LIST=0 ; PRUNE=0 ; KEEP=5 ; OLDER="" ; DRY_RUN=0 ; DELETE="" ; COMPRESS=0
+NAME="" ; OUT="$BACKUP_ROOT" ; DB=1 ; FILES=1 ; JSON=0 ; LIST=0 ; PRUNE=0 ; KEEP=5 ; OLDER="" ; DRY_RUN=0 ; DELETE="" ; COMPRESS=0 ; LABEL=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--out) OUT="$2"; shift ;; --out=*) OUT="${1#--out=}" ;;
 		--db-only) FILES=0 ;; --files-only) DB=0 ;; --compress) COMPRESS=1 ;;
+		--label) LABEL="$2"; shift ;; --label=*) LABEL="${1#--label=}" ;;
 		--list) LIST=1 ;; --json) JSON=1 ;;
 		--prune) PRUNE=1 ;; --keep) KEEP="$2"; shift ;; --keep=*) KEEP="${1#--keep=}" ;;
 		--older-than) OLDER="$2"; shift ;; --older-than=*) OLDER="${1#--older-than=}" ;;
@@ -77,7 +79,7 @@ if [ "1" = "$LIST" ]; then
 		jq --arg path "$d" --argjson size "$(( ${sz:-0} * 1024 ))" '. + {path:$path, size_bytes:$size}' "$m"
 	done | jq -s 'sort_by(.created) | reverse')"
 	if [ "1" = "$JSON" ]; then echo "$out"; else
-		echo "$out" | jq -r '.[] | "\(.name)\t\(.created)\t\(.size_bytes / 1048576 | floor)M\t\(if .db_dump then "db" else "-" end)\t\(if .files_archive then "tar" elif .files then "files" else "-" end)\t\(.path)"' | column -t -s $'\t'
+		echo "$out" | jq -r '.[] | "\(.name)\t\(.created)\t\(.size_bytes / 1048576 | floor)M\t\(if .db_dump then "db" else "-" end)\t\(if .files_archive then "tar" elif .files then "files" else "-" end)\t\(.label // "")\t\(.path)"' | column -t -s $'\t'
 	fi
 	exit 0
 fi
@@ -121,8 +123,8 @@ elif [ "1" = "$FILES" ]; then
 fi
 
 jq -n --arg name "$NAME" --arg url "$URL" --arg php "$PHPV" --arg path "$SITE_PATH" --arg db "$db_name" --argjson tables "$n_tables" \
-	--argjson dump "$dump" --argjson files "$files" --argjson archive "$archive" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg host "$(hostname -s)" \
-	'{name:$name,url:$url,php:$php,source_path:$path,db:(if $db == "" then null else $db end),tables:$tables,db_dump:$dump,files:$files,files_archive:$archive,created:$created,host:$host}' > "$DEST/manifest.json"
+	--argjson dump "$dump" --argjson files "$files" --argjson archive "$archive" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg host "$(hostname -s)" --arg label "$LABEL" \
+	'{name:$name,url:$url,php:$php,source_path:$path,db:(if $db == "" then null else $db end),tables:$tables,db_dump:$dump,files:$files,files_archive:$archive,label:(if $label == "" then null else $label end),created:$created,host:$host}' > "$DEST/manifest.json"
 size="$(du -sk "$DEST" | cut -f1)"
 log "done: $DEST ($(( size / 1024 ))M on disk)"
 if [ "1" = "$JSON" ]; then

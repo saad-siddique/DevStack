@@ -182,33 +182,50 @@
 			return a.name < b.name ? -1 : ( a.name > b.name ? 1 : 0 );
 		} );
 		$( 'sort-size' ).classList.toggle( 'on', sortBySize );
+		$( 'sort-name' ).classList.toggle( 'on', ! sortBySize );
+		var sharing = ( s.share && s.share.sites ) || [];
 		rows.forEach( function ( site ) {
 			var host = site.name + '.test';
-			var php = 'default' === site.php ? '8.4' : site.php;
-			// The name column already opens the site; this column is wp-admin only (empty for PHP/static sites).
-			var open = el( 'td', {} );
-			if ( site.wp ) {
-				open.appendChild( el( 'a', { href: 'https://' + host + '/wp-admin/', target: '_blank', rel: 'noopener', text: 'wp-admin' } ) );
-			}
+			var php = 'default' === site.php ? ( ( s.php || [] ).filter( function ( p ) { return p['default']; } ).map( function ( p ) { return p.version; } )[ 0 ] || '8.4' ) : site.php;
 			var star = el( 'button', { 'class': 'star' + ( site.favorite ? ' on' : '' ), type: 'button', title: site.favorite ? 'Remove from favourites' : 'Add to favourites', 'aria-pressed': site.favorite ? 'true' : 'false', text: site.favorite ? '★' : '☆' } );
 			star.addEventListener( 'click', function () { star.disabled = true; post( 'favorite', { name: site.name, op: 'toggle' } ).then( refresh ); } );
-			var nameCell = el( 'td', { 'class': 'name' }, [ star, el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: host } ) ] );
-			if ( site.fatals_recent ) {
-				nameCell.appendChild( el( 'span', { 'class': 'badge fatals', title: site.fatals_recent + ' PHP fatal error(s) in debug.log today or yesterday — Logs tab, wp ' + site.name, text: site.fatals_recent + ( 1 === site.fatals_recent ? ' fatal' : ' fatals' ) } ) );
+			// Second line: PHP, HTTPS, footprint, cache, fatals — everything that used to be its own column.
+			var meta = el( 'div', { 'class': 'meta' } );
+			meta.appendChild( el( 'span', { 'class': 'badge' + ( '7.4' === php ? ' php74' : '' ), text: 'PHP ' + php } ) );
+			meta.appendChild( el( 'span', { 'class': 'badge ' + ( site.secured ? 'https' : 'http' ), text: site.secured ? 'https' : 'http only' } ) );
+			if ( null !== site.files_bytes || site.db_bytes ) {
+				meta.appendChild( el( 'span', { 'class': 'size', title: 'folder' + ( site.db ? ' + database ' + site.db : '' ), text: ( null !== site.files_bytes ? fmtBytes( site.files_bytes ) : '?' ) + ( site.db_bytes ? ' + ' + fmtBytes( site.db_bytes ) + ' db' : '' ) } ) );
 			}
-			var disk = el( 'td', { 'class': 'disk' } );
-			if ( null !== site.files_bytes || null !== site.db_bytes ) {
-				disk.appendChild( el( 'span', { title: 'folder' + ( site.db ? ' + database ' + site.db : '' ), text: ( null !== site.files_bytes ? fmtBytes( site.files_bytes ) : '?' ) + ( site.db_bytes ? ' + ' + fmtBytes( site.db_bytes ) + ' db' : '' ) } ) );
-			} else {
-				disk.appendChild( el( 'span', { 'class': 'muted', text: '—' } ) );
+			if ( site.object_cache ) { meta.appendChild( el( 'span', { 'class': 'badge cache', title: 'persistent object cache', text: site.object_cache } ) ); }
+			if ( site.protected ) { meta.appendChild( el( 'span', { 'class': 'badge', title: 'Protected: tooling never removes it', text: 'protected' } ) ); }
+			if ( site.fatals_recent ) { meta.appendChild( el( 'span', { 'class': 'badge fatals', title: 'PHP fatal errors in debug.log today or yesterday — Logs tab, wp ' + site.name, text: site.fatals_recent + ( 1 === site.fatals_recent ? ' fatal' : ' fatals' ) } ) ); }
+			var nameCell = el( 'td', { 'class': 'name' }, [
+				el( 'div', { 'class': 'title' }, [ star, el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: host } ) ] ),
+				meta
+			] );
+			// Actions: the things you do to a site.
+			var actions = el( 'td', { 'class': 'actions' } );
+			actions.appendChild( el( 'a', { href: 'https://' + host, target: '_blank', rel: 'noopener', text: 'Open' } ) );
+			if ( site.wp ) {
+				actions.appendChild( el( 'a', { href: 'https://' + host + '/wp-admin/', target: '_blank', rel: 'noopener', text: 'wp-admin' } ) );
+				var login = el( 'button', { 'class': 'linkish', type: 'button', title: 'One-time link, signed in as the first administrator', text: 'Log in' } );
+				login.addEventListener( 'click', function () {
+					login.disabled = true;
+					post( 'login', { name: site.name } ).then( function ( r ) { login.disabled = false; if ( r && r.url ) { window.open( r.url, '_blank', 'noopener' ); } } );
+				} );
+				actions.appendChild( login );
+				var isShared = -1 !== sharing.indexOf( site.name );
+				var shareBtn = el( 'button', { 'class': 'linkish' + ( isShared ? ' live' : '' ), type: 'button', title: isShared ? 'Stop the public tunnel' : 'Public URL through a Cloudflare tunnel', text: isShared ? 'Unshare' : 'Share' } );
+				shareBtn.addEventListener( 'click', function () {
+					shareBtn.disabled = true; shareBtn.textContent = isShared ? 'stopping…' : 'sharing…';
+					post( 'share', isShared ? { op: 'stop' } : { op: 'start', name: site.name } ).then( refresh );
+				} );
+				actions.appendChild( shareBtn );
 			}
 			tbody.appendChild( el( 'tr', {}, [
 				nameCell,
-				el( 'td', {}, [ el( 'span', { 'class': 'badge' + ( '7.4' === php ? ' php74' : '' ), text: 'PHP ' + php } ) ] ),
-				el( 'td', {}, [ el( 'span', { 'class': 'badge ' + ( site.secured ? 'https' : 'http' ), text: site.secured ? 'https' : 'http only' } ) ] ),
-				open,
-				disk,
-				el( 'td', { 'class': 'folder', title: site.path, text: ( site.path || '' ).replace( s.sites_dir, '~/Sites' ) } )
+				el( 'td', { 'class': 'folder', title: site.path, text: ( site.path || '' ).replace( s.sites_dir, '~/Sites' ) } ),
+				actions
 			] ) );
 		} );
 		$( 'sites-count' ).textContent = rows.length === s.sites.length ? String( s.sites.length ) : rows.length + ' of ' + s.sites.length;
@@ -248,6 +265,7 @@
 		$( 'summary' ).textContent = summary( s );
 		renderAlert( s );
 		renderUpgrades( s );
+		renderShare( s );
 		renderStrip( s );
 		renderServices( s );
 		renderPorts( s );
@@ -285,11 +303,13 @@
 			if ( 'logs' === currentTab ) { logData = null; loadLog(); }
 		} );
 	}
-	$( 'sort-size' ).addEventListener( 'click', function () {
-		sortBySize = ! sortBySize;
-		localStorage.setItem( 'sites.sort', sortBySize ? 'size' : 'name' );
+	function setSort( bySize ) {
+		sortBySize = bySize;
+		localStorage.setItem( 'sites.sort', bySize ? 'size' : 'name' );
 		if ( last ) { renderSites( last ); }
-	} );
+	}
+	$( 'sort-size' ).addEventListener( 'click', function () { setSort( true ); } );
+	$( 'sort-name' ).addEventListener( 'click', function () { setSort( false ); } );
 	$( 'refresh' ).addEventListener( 'click', function () { refresh(); } );
 
 
@@ -318,6 +338,22 @@
 		$( 'pulse' ).classList.toggle( 'stale', severe );
 		navDot( 'services', errs.length > 0 );
 		navDot( 'logs', crashes.length > 0 );
+	}
+
+	// Public tunnel (bin/site-share): URL(s), sites, Stop.
+	function renderShare( s ) {
+		var box = $( 'share' );
+		box.textContent = '';
+		if ( ! s.share ) { box.hidden = true; return; }
+		var urls = s.share.urls || [ s.share.url ];
+		var text = el( 'div', { 'class': 'text' } );
+		text.appendChild( el( 'p', { 'class': 'ok', text: 'Sharing ' + ( s.share.sites || [ s.share.site ] ).join( ', ' ) + ' publicly (' + s.share.mode + ' tunnel)' } ) );
+		urls.forEach( function ( u ) { text.appendChild( el( 'p', {}, [ el( 'a', { href: u, target: '_blank', rel: 'noopener', text: u } ) ] ) ); } );
+		var actions = el( 'div', { 'class': 'actions' } );
+		actions.appendChild( button( 'Stop sharing', 'quiet', function () { return post( 'share', { op: 'stop' } ); } ) );
+		box.appendChild( text );
+		box.appendChild( actions );
+		box.hidden = false;
 	}
 
 	// Homebrew state of the stack (bin/stack-upgrade): what the nightly run did, what waits, and the nightly setting.

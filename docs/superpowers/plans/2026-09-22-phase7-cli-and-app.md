@@ -109,3 +109,29 @@ brew/valet/mysql itself.
   stack-status sites[] gain db (name), db_bytes (live), files_bytes (cache) and a top-level sizes{} block; app Sites
   tab: size in the subtitle, A–Z/Size sort, totals line + Measure; dashboard: Disk column (sortable header), totals
   line + Measure folders (detached nohup); Archive dialog: Compress toggle + footprint.
+
+## Share, save points, object cache, uninstall, doctor --fix, sparkline (same afternoon)
+
+- `bin/site-share`: named Cloudflare tunnel when ~/.cloudflared/config.yml maps a hostname to https://<site>.test
+  (the MAMP rule for saad-wp.uncannycloud.com was rewritten to Valet with noTLSVerify + host header; a dated backup of
+  config.yml sits beside it), quick tunnel otherwise; detached, state in share.json, embedded in stack-status;
+  mu-plugins/uo-local-share.php answers under the public host (filters home/siteurl, HTTPS on, no canonical redirect)
+  so the per-developer wp-config tunnel block is no longer needed. Gotcha: `jq` on a missing state file exits 2
+  under set -e → guard with `[ -f ] && … || true`.
+- Save points: `site-backup --db-only --label`, `site-restore --db-only` (drop + recreate + import), Backups window
+  "Roll back database". Archive compresses by default (`--no-compress` keeps the clone).
+- `bin/site-cache redis|memcached|off` (redis-cache plugin + drop-in with WP_REDIS_PREFIX per site; memcached-redux
+  with WP_CACHE_KEY_SALT; `wp redis` needs plugins loaded, so a second WP-CLI wrapper without --skip-plugins).
+- `bin/uninstall --yes [--purge]`, `doctor --fix` (auto commands per finding, then re-check), menu-bar CPU sparkline
+  toggle (template image, 15 s sampling while closed), bootstrap ensure_mu_plugins for every WordPress site.
+- ~/.zshrc: the plaintext NPM_TOKEN moved into the login keychain (`security find-generic-password -s github-npm-token -w`).
+
+## Design (same afternoon)
+
+Three mockups (dashboard/design/index.html: A Ledger, B Console, C Glass); Saad chose Glass for light and Console
+for dark, system-dependent. Implemented as app/Sources/DevStack/Theme.swift (palettes, Card, Notice, Tile, Figure)
+plus a PanelView rewrite: gradient hero with glyph, summary and live CPU/MB, notice cards, quick-open card, load card,
+segmented control, content card with letter tiles. Per Saad: size sits under the site name beside the PHP version,
+actions (open, wp-admin, log in, ⋯) on the right. Dashboard Sites table collapsed to Site (badges + size underneath),
+Folder, Actions (Open, wp-admin, Log in, Share/Unshare); A–Z/Size sort in the panel head; `.upgrades[hidden]`
+needed an explicit display:none because the class set display:flex.

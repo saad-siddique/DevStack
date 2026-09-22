@@ -56,7 +56,7 @@ final class FormModel: ObservableObject {
 	@Published var adminPassword = "admin1"
 	@Published var adminEmail = "admin@example.test"
 	@Published var keep = 5
-	@Published var compress = false
+	@Published var compress = true
 }
 
 struct NewSiteView: View {
@@ -306,19 +306,24 @@ struct BackupsView: View {
 	private func backupRow(_ b: BackupEntry) -> some View {
 		let exists = state.siteExists(b.name)
 		return HStack(spacing: 10) {
-			Image(systemName: b.restorable ? "externaldrive.fill" : "cylinder.split.1x2").foregroundStyle(.secondary).frame(width: 16)
+			Image(systemName: b.isSavePoint ? "clock.arrow.circlepath" : (b.isCompressed ? "doc.zipper" : "externaldrive.fill")).foregroundStyle(.secondary).frame(width: 16)
 			VStack(alignment: .leading, spacing: 1) {
 				HStack(spacing: 6) {
 					Text(b.name).fontWeight(.medium)
 					if !exists { Text("site absent").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1).background(Color.orange.opacity(0.15), in: Capsule()) }
 				}
-				Text([b.createdDate?.formatted(date: .abbreviated, time: .shortened) ?? "?", b.sizeText, b.php.map { "PHP \($0.replacingOccurrences(of: "php@", with: ""))" }, b.tables.map { "\($0) tables" }, b.isCompressed ? "files (compressed) + database" : (b.restorable ? "files + database" : "database only")]
+				Text([b.createdDate?.formatted(date: .abbreviated, time: .shortened) ?? "?", b.label, b.sizeText, b.php.map { "PHP \($0.replacingOccurrences(of: "php@", with: ""))" }, b.tables.map { "\($0) tables" }, b.isCompressed ? "files (compressed) + database" : (b.restorable ? "files + database" : "database save point")]
 					.compactMap { $0 }.joined(separator: "  ·  ")).font(.caption).foregroundStyle(.secondary)
 			}
 			Spacer()
-			Button(exists ? "Restore…" : "Restore") {
-				if exists { pending.restoreReplacing = b } else { state.restore(b, replace: false) }
-			}.controlSize(.small).disabled(!b.restorable || state.task.running).help(b.restorable ? "" : "Database-only backup: use devstack import")
+			if b.isSavePoint {
+				Button("Roll back database") { state.rollBack(b) }.controlSize(.small).disabled(!exists || state.task.running)
+					.help(exists ? "Drop and rebuild this site's database from the save point; files stay" : "The site is absent; restore a full backup first")
+			} else {
+				Button(exists ? "Restore…" : "Restore") {
+					if exists { pending.restoreReplacing = b } else { state.restore(b, replace: false) }
+				}.controlSize(.small).disabled(!b.restorable || state.task.running)
+			}
 			Button { state.openFolder(b.path) } label: { Image(systemName: "folder") }.buttonStyle(.borderless).help("Show in Finder")
 			Button { pending.deleting = b } label: { Image(systemName: "trash") }.buttonStyle(.borderless).help("Delete this backup")
 		}

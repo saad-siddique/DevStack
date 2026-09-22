@@ -12,6 +12,17 @@ struct StackStatus: Decodable {
 	var upgrades: Upgrades?
 	var watchdog: Watchdog?
 	var sizes: Sizes?
+	var share: Share?
+
+	struct Share: Decodable {
+		let mode: String?
+		let pid: Int?
+		let site: String?
+		let url: String?
+		let sites: [String]?
+		let urls: [String]?
+		let started: String?
+	}
 
 	struct Sizes: Decodable {
 		let computedAt: String?
@@ -94,6 +105,7 @@ struct Site: Decodable, Identifiable, Equatable, Hashable {
 	let debugLog: String?
 	let favorite: Bool?
 	var isFavorite: Bool { favorite ?? false }
+	let objectCache: String?     // redis | memcached | other | nil
 	let db: String?
 	let dbBytes: Int?           // live, from information_schema
 	let filesBytes: Int?        // from the nightly du (devstack sizes --refresh)
@@ -210,8 +222,10 @@ struct BackupEntry: Decodable, Identifiable, Equatable {
 	let dbDump: String?
 	let files: Bool?
 	let filesArchive: String?
+	let label: String?
 	let sizeBytes: Int?
 	var id: String { path }
+	var isSavePoint: Bool { !(files ?? false) && dbDump != nil }
 	var isCompressed: Bool { filesArchive != nil }
 	var createdDate: Date? { created.flatMap { ISO8601DateFormatter().date(from: $0) } }
 	var sizeText: String { ByteCountFormatter.string(fromByteCount: Int64(sizeBytes ?? 0), countStyle: .file) }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# site-restore <name> [--from BACKUP_DIR] [--replace] [--json]
+# site-restore <name> [--from BACKUP_DIR] [--replace] [--db-only] [--json]
+#   --db-only: roll only the database back (drop + recreate + import) into the existing site; files untouched.
 # Verbatim restore of a site from a devstack backup: same name, URL, PHP version, database name and credentials
 # (wp-config is restored as it was, so no URL rewrite and no new DB user). Default source: the newest backup of
 # <name>. If the site still exists, --replace takes a fresh safety backup, removes it, then restores. Protected
@@ -7,11 +8,11 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/DevStack}"
-NAME="" ; FROM="" ; REPLACE=0 ; JSON=0
+NAME="" ; FROM="" ; REPLACE=0 ; JSON=0 ; DB_ONLY=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--from) FROM="$2"; shift ;; --from=*) FROM="${1#--from=}" ;;
-		--replace) REPLACE=1 ;; --json) JSON=1 ;;
+		--replace) REPLACE=1 ;; --db-only) DB_ONLY=1 ;; --json) JSON=1 ;;
 		--*) die "unknown flag $1" ;;
 		*) NAME="$1" ;;
 	esac
@@ -21,12 +22,35 @@ done
 if [ -z "$FROM" ]; then FROM="$(ls -d "$BACKUP_ROOT/$NAME"/*/ 2> /dev/null | sort | tail -1)"; FROM="${FROM%/}"; fi
 [ -n "$FROM" ] && [ -f "$FROM/manifest.json" ] || die "no backup found for $NAME (devstack backups)"
 ARCHIVE="$(jq -r '.files_archive // empty' "$FROM/manifest.json")"
-[ -d "$FROM/files" ] || [ -n "$ARCHIVE" ] && [ -f "$FROM/$ARCHIVE" ] || [ -d "$FROM/files" ] || die "$FROM has no files (made with --db-only); use devstack import for a database-only restore"
+if [ "1" != "$DB_ONLY" ]; then
+	[ -d "$FROM/files" ] || { [ -n "$ARCHIVE" ] && [ -f "$FROM/$ARCHIVE" ]; } || die "$FROM holds only a database (a save point): use --db-only to roll the database back"
+fi
 PHPV="$(jq -r '.php // empty' "$FROM/manifest.json")"; PHPV="${PHPV:-$DEFAULT_PHP}"
 DUMP="$(jq -r '.db_dump // empty' "$FROM/manifest.json")"
 SITE_PATH="$SITES_DIR/$NAME"; URL="https://$NAME.$TLD"
 mkdir -p "$LOG_DIR"; exec 2> >(tee -a "$LOG_DIR/site-restore-$NAME.log" >&2)
 log "=== site-restore $NAME from $FROM ($PHPV)"
+
+if [ "1" = "$DB_ONLY" ]; then
+	# Roll back: the site stays, its database is dropped and rebuilt from the dump.
+	SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+	[ -n "$SITE_PATH" ] && [ -f "$SITE_PATH/wp-config.php" ] || die "$NAME is not a linked WordPress site"
+	[ -n "$DUMP" ] && [ -f "$FROM/$DUMP" ] || die "$FROM has no database dump"
+	PHPV="$(site_php "$SITE_PATH")"
+	wp() { wp_site "$PHPV" "$SITE_PATH" "$@"; }
+	db_name="$(wp config get DB_NAME 2> /dev/null | tail -1 || true)"; [ -n "$db_name" ] || die "cannot read DB_NAME"
+	dbq="$(printf '%s' "$db_name" | sed 's/`/``/g')"
+	log "db: rebuilding $db_name from $FROM"
+	mysql_new -e "DROP DATABASE IF EXISTS \`$dbq\`; CREATE DATABASE \`$dbq\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
+	case "$FROM/$DUMP" in *.gz) gzip -dc "$FROM/$DUMP" ;; *) cat "$FROM/$DUMP" ;; esac | sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$db_name"
+	n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$(sql_quote "$db_name")' AND TABLE_TYPE='BASE TABLE'")"
+	wp cache flush --quiet 2> /dev/null || true
+	code="$(/usr/bin/curl -4 -sk -o /dev/null -m 15 -w '%{http_code}' "$URL/" || true)"
+	log "db: $n_tables tables; site answers $code"
+	if [ "1" = "$JSON" ]; then jq -n --arg name "$NAME" --arg from "$FROM" --arg db "$db_name" --argjson tables "$n_tables" --argjson http "${code:-0}" --argjson ok "$([ 200 = "$code" ] && echo true || echo false)" '{name:$name,from:$from,db:$db,tables:$tables,http:$http,db_only:true,ok:$ok}'
+	else echo "$NAME: database rolled back to $(jq -r '.label // .created' "$FROM/manifest.json") ($n_tables tables, http $code)"; fi
+	[ "200" = "$code" ]; exit
+fi
 
 replaced=false
 if [ -e "$SITE_PATH" ] || [ -L "$VALET_HOME/Sites/$NAME" ]; then

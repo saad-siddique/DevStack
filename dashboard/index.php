@@ -148,6 +148,29 @@ if ( '' !== $api ) {
 		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'site-favorite failed' ) );
 	}
 
+	if ( 'login' === $api && $is_write ) {
+		$name = (string) ( $_POST['name'] ?? '' );
+		if ( ! preg_match( '/^[a-z0-9][a-z0-9.-]*$/', $name ) ) {
+			devstack_json( 400, array( 'error' => 'Unknown site.' ) );
+		}
+		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/site-login', $name, '--json' ), $home );
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'site-login failed' ) );
+	}
+
+	if ( 'share' === $api && $is_write ) {
+		$op   = (string) ( $_POST['op'] ?? '' );
+		$name = (string) ( $_POST['name'] ?? '' );
+		if ( 'stop' === $op ) {
+			list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/site-share', '--stop', '--json' ), $home );
+		} elseif ( 'start' === $op && preg_match( '/^[a-z0-9][a-z0-9.-]*$/', $name ) ) {
+			set_time_limit( 90 );
+			list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/site-share', $name, '--json' ), $home );
+		} else {
+			devstack_json( 400, array( 'error' => 'Unknown share operation.' ) );
+		}
+		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'site-share failed' ) );
+	}
+
 	if ( 'sizes-refresh' === $api && $is_write ) {
 		// du over every site takes minutes: start it detached and let the next status reload pick the numbers up.
 		$cmd = sprintf( 'nohup %s --refresh --json > /dev/null 2>&1 &', escapeshellarg( $repo_bin . '/site-sizes' ) );
@@ -222,14 +245,19 @@ header( 'Cache-Control: no-store' );
 				<p class="summary" id="summary" aria-live="polite">Reading the stack…</p>
 				<div class="quick" id="quick" aria-label="Quick open"></div>
 			</header>
+			<div class="upgrades share" id="share" hidden role="status"></div>
 			<div class="upgrades" id="upgrades" hidden role="status"></div>
 			<ul class="strip" id="strip" aria-label="Service status"></ul>
 			<div class="panel-head">
 				<h3>Sites <span class="count" id="sites-count"></span></h3>
+				<div class="sort" role="group" aria-label="Sort">
+					<button type="button" class="th-sort on" id="sort-name">A–Z</button>
+					<button type="button" class="th-sort" id="sort-size" title="Sort by disk footprint (folder + database)">Size</button>
+				</div>
 				<label class="filter"><span class="visually-hidden">Filter sites</span><input type="search" id="filter" placeholder="Filter sites" autocomplete="off"></label>
 			</div>
 			<table class="sites" id="sites">
-				<thead><tr><th scope="col">Site</th><th scope="col">PHP</th><th scope="col">HTTPS</th><th scope="col">Open</th><th scope="col"><button type="button" class="th-sort" id="sort-size" title="Sort by disk footprint">Disk</button></th><th scope="col">Folder</th></tr></thead>
+				<thead><tr><th scope="col">Site</th><th scope="col">Folder</th><th scope="col" class="actions-col">Actions</th></tr></thead>
 				<tbody></tbody>
 			</table>
 			<p class="empty" id="sites-empty" hidden></p>

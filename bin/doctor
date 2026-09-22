@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# doctor [--json] : one pass over everything that can silently break the stack, with the fix for each finding.
-# Exit 0 when all green, 1 when something needs attention. Read-only.
+# doctor [--fix] [--json] : one pass over everything that can silently break the stack, with the fix for each finding.
+# Exit 0 when all green, 1 when something needs attention. Read-only unless --fix, which runs the safe fixes
+# (start a service, re-run bootstrap for missing drop-ins, links and agents) and checks again.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-JSON=0; [ "${1:-}" = "--json" ] && JSON=1
+JSON=0; FIX=0
+for arg in "$@"; do case "$arg" in --json) JSON=1 ;; --fix) FIX=1 ;; *) die "usage: doctor [--fix] [--json]" ;; esac; done
 
 checks='[]'
-add() { # add <ok|warn|fail> <name> <detail> [fix]
-	checks="$(jq -c --arg s "$1" --arg n "$2" --arg d "$3" --arg f "${4:-}" '. + [{status:$s,name:$n,detail:$d,fix:(if $f == "" then null else $f end)}]' <<<"$checks")"
+add() { # add <ok|warn|fail> <name> <detail> [fix text] [auto command]
+	checks="$(jq -c --arg s "$1" --arg n "$2" --arg d "$3" --arg f "${4:-}" --arg a "${5:-}" '. + [{status:$s,name:$n,detail:$d,fix:(if $f == "" then null else $f end),auto:(if $a == "" then null else $a end)}]' <<<"$checks")"
 }
+auto_svc() { printf '%s/bin/service %s start' "$REPO_DIR" "$1"; }   # the auto command for "start this service"
+auto_boot() { printf '%s/bootstrap.sh' "$REPO_DIR"; }
 services="$( { sudo -n brew services list --json 2> /dev/null || echo '[]'; brew services list --json 2> /dev/null || echo '[]'; } | jq -s 'add')"
 svc_status() { jq -r --arg n "$1" '[.[] | select(.name == $n)] | max_by(if .status == "started" then 1 else 0 end) | .status // "none"' <<<"$services"; }
 
 # --- DNS and web
 if [ -f /etc/resolver/$TLD ]; then add ok "resolver" "/etc/resolver/$TLD present"; else add fail "resolver" "/etc/resolver/$TLD missing" "valet install"; fi
-if [ "started" = "$(svc_status dnsmasq)" ]; then add ok "dnsmasq" "running"; else add fail "dnsmasq" "status $(svc_status dnsmasq)" "devstack service dnsmasq start"; fi
+if [ "started" = "$(svc_status dnsmasq)" ]; then add ok "dnsmasq" "running"; else add fail "dnsmasq" "status $(svc_status dnsmasq)" "devstack service dnsmasq start" "$(auto_svc dnsmasq)"; fi
 ip="$(dscacheutil -q host -a name "doctor-probe.$TLD" 2> /dev/null | awk '/ip_address/{print $2}' | head -1 || true)"
 if [ "127.0.0.1" = "$ip" ]; then add ok "dns" "*.$TLD resolves to 127.0.0.1"; else add fail "dns" "doctor-probe.$TLD resolves to '${ip:-nothing}'" "devstack service dnsmasq restart (then check /etc/resolver/$TLD)"; fi
-if [ "started" = "$(svc_status nginx)" ]; then add ok "nginx" "running"; else add fail "nginx" "status $(svc_status nginx)" "devstack service nginx start; devstack logs nginx"; fi
+if [ "started" = "$(svc_status nginx)" ]; then add ok "nginx" "running"; else add fail "nginx" "status $(svc_status nginx)" "devstack service nginx start; devstack logs nginx" "$(auto_svc nginx)"; fi
 # nginx -t without root still parses everything; only the root-owned pid file trips it afterwards. Judge the syntax line.
 out="$("$BREW_PREFIX/bin/nginx" -t -e stderr 2>&1 || true)"
 emerg="$(grep '\[emerg\]' <<<"$out" | grep -v 'nginx.pid' | head -1 || true)"
@@ -36,12 +40,12 @@ for d in "$BREW_PREFIX"/etc/php/*/; do
 	used="$(/usr/bin/grep -l "valet${v/./}.sock" "$VALET_HOME"/Nginx/* 2> /dev/null | wc -l | tr -d ' ' || true)"
 	[ "valet${v/./}.sock" = "$(basename "$default_sock")" ] && used="default"
 	st="$(svc_status "$formula")"
-	if [ "0" != "$used" ] && [ "started" != "$st" ]; then add fail "php-fpm $v" "sites use it ($used) but php-fpm is $st" "devstack service php@$v start"
+	if [ "0" != "$used" ] && [ "started" != "$st" ]; then add fail "php-fpm $v" "sites use it ($used) but php-fpm is $st" "devstack service php@$v start" "$(auto_svc "php@$v")"
 	elif [ "started" = "$st" ] && [ ! -S "$VALET_HOME/valet${v/./}.sock" ]; then add fail "php-fpm $v" "running but no socket valet${v/./}.sock" "devstack service php@$v restart; devstack logs php-fpm"
 	elif [ "started" = "$st" ]; then add ok "php-fpm $v" "running, $([ default = "$used" ] && echo default || echo "$used isolated sites")"
 	else add ok "php-fpm $v" "off (no sites)"; fi
-	[ -f "$d/conf.d/zz-uo-dev.ini" ] || add warn "php $v ini" "zz-uo-dev.ini drop-in missing" "./bootstrap.sh"
-	[ -f "$d/php-fpm.d/zz-devstack.conf" ] || add warn "php $v pool" "pool guard drop-in missing (5 workers, no request timeout)" "./bootstrap.sh"
+	[ -f "$d/conf.d/zz-uo-dev.ini" ] || add warn "php $v ini" "zz-uo-dev.ini drop-in missing" "./bootstrap.sh" "$(auto_boot)"
+	[ -f "$d/php-fpm.d/zz-devstack.conf" ] || add warn "php $v pool" "pool guard drop-in missing (5 workers, no request timeout)" "./bootstrap.sh" "$(auto_boot)"
 done
 n_max="$(cat "$BREW_PREFIX"/var/log/php-fpm.log "$VALET_HOME"/Log/php-fpm.log 2> /dev/null | grep -c 'max_children' || true)"
 [ "${n_max:-0}" -gt 0 ] && add warn "php-fpm workers" "pool hit pm.max_children $n_max time(s) in the current logs" "raise pm.max_children in php/zz-devstack-fpm.conf, ./bootstrap.sh"
@@ -50,10 +54,10 @@ n_max="$(cat "$BREW_PREFIX"/var/log/php-fpm.log "$VALET_HOME"/Log/php-fpm.log 2>
 if "$BREW_PREFIX/opt/mysql@8.4/bin/mysqladmin" -uroot ping > /dev/null 2>&1; then
 	add ok "mysql" "answers on 3306 as root"
 	lb="$(mysql_new -N -e 'SELECT @@log_bin' 2> /dev/null || true)"; [ "0" = "$lb" ] && add ok "mysql binlog" "off" || add warn "mysql binlog" "binary logging on (burns disk and writes locally)" "./bootstrap.sh (installs mysql/zz-devstack.cnf)"
-else add fail "mysql" "not answering" "devstack service mysql@8.4 start; devstack logs mysql"; fi
-if curl -s -m 2 http://localhost:8025/api/v1/info > /dev/null; then add ok "mailpit" "UI on 8025"; else add warn "mailpit" "no answer on 8025 (sites' mail is lost)" "devstack service mailpit start"; fi
-if "$BREW_PREFIX/bin/redis-cli" -h 127.0.0.1 ping 2> /dev/null | grep -q PONG; then add ok "redis" "PONG on 127.0.0.1:6379"; else add warn "redis" "no PONG" "devstack service redis start"; fi
-if printf 'version\r\nquit\r\n' | nc -w1 127.0.0.1 11211 2> /dev/null | grep -q VERSION; then add ok "memcached" "answers on 11211"; else add warn "memcached" "no answer on 11211" "devstack service memcached start"; fi
+else add fail "mysql" "not answering" "devstack service mysql@8.4 start; devstack logs mysql" "$(auto_svc mysql@8.4)"; fi
+if curl -s -m 2 http://localhost:8025/api/v1/info > /dev/null; then add ok "mailpit" "UI on 8025"; else add warn "mailpit" "no answer on 8025 (sites' mail is lost)" "devstack service mailpit start" "$(auto_svc mailpit)"; fi
+if "$BREW_PREFIX/bin/redis-cli" -h 127.0.0.1 ping 2> /dev/null | grep -q PONG; then add ok "redis" "PONG on 127.0.0.1:6379"; else add warn "redis" "no PONG" "devstack service redis start" "$(auto_svc redis)"; fi
+if printf 'version\r\nquit\r\n' | nc -w1 127.0.0.1 11211 2> /dev/null | grep -q VERSION; then add ok "memcached" "answers on 11211"; else add warn "memcached" "no answer on 11211" "devstack service memcached start" "$(auto_svc memcached)"; fi
 jq -r '.[] | select(.status | test("^error")) | .name' <<<"$services" | while read -r n; do [ -n "$n" ] && add fail "launchd" "$n reports error" "devstack service $n restart; devstack logs $n"; done
 
 # --- certificates (Valet signs sites for ~1 year)
@@ -67,8 +71,8 @@ if [ "$expired" -gt 0 ]; then add fail "certificates" "$expired expired" "valet 
 
 # --- plumbing
 sudo -n -l "$VALET_BIN" > /dev/null 2>&1 && add ok "sudoers" "valet + brew trusted (no password prompts)" || add fail "sudoers" "valet trust missing" "valet trust"
-[ "$(readlink "$BREW_PREFIX/bin/devstack" 2> /dev/null)" = "$REPO_DIR/bin/devstack" ] && add ok "devstack link" "$BREW_PREFIX/bin/devstack -> this repo" || add warn "devstack link" "points elsewhere or missing" "./bootstrap.sh"
-for a in logs-prune upgrade watchdog; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh"; done
+[ "$(readlink "$BREW_PREFIX/bin/devstack" 2> /dev/null)" = "$REPO_DIR/bin/devstack" ] && add ok "devstack link" "$BREW_PREFIX/bin/devstack -> this repo" || add warn "devstack link" "points elsewhere or missing" "./bootstrap.sh" "$(auto_boot)"
+for a in logs-prune upgrade watchdog; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh" "$(auto_boot)"; done
 free_gb="$(df -g "$HOME" | awk 'NR==2{print $4}')"
 [ "${free_gb:-0}" -ge 10 ] && add ok "disk" "${free_gb} GB free" || add warn "disk" "only ${free_gb} GB free" "devstack backups (delete old ones), brew cleanup, devstack logs-prune"
 bk="$(du -sk "$HOME/Backups/DevStack" 2> /dev/null | cut -f1 || true)"; [ "${bk:-0}" -gt $((20*1024*1024)) ] && add warn "backups" "$((bk/1024/1024)) GB in ~/Backups/DevStack" "delete backups you no longer need"
@@ -79,6 +83,15 @@ nc="$(jq -r '.crashes // 0' <<<"$reports")"; nr="$(jq -r '.resource // 0' <<<"$r
 [ "$nr" -gt 0 ] && add warn "resource reports" "$nr macOS resource report(s) in 24 h: $(jq -r '[.reports[] | select(.kind != "crash") | "\(.process) (\(.kind))"] | unique | join(", ")' <<<"$reports")" "devstack logs crashes"
 
 n_fail="$(jq '[.[] | select(.status == "fail")] | length' <<<"$checks")"; n_warn="$(jq '[.[] | select(.status == "warn")] | length' <<<"$checks")"
+if [ "1" = "$FIX" ]; then
+	fixes="$(jq -r '[.[] | select(.status != "ok" and .auto != null) | .auto] | unique | .[]' <<<"$checks")"
+	if [ -n "$fixes" ]; then
+		while IFS= read -r cmd; do log "fix: $cmd"; bash -c "$cmd" > /dev/null 2>&1 || log "warning: fix failed: $cmd"; done <<<"$fixes"
+		log "re-checking"; exec "$0" $([ "1" = "$JSON" ] && echo --json)
+	else
+		log "nothing auto-fixable"
+	fi
+fi
 if [ "1" = "$JSON" ]; then
 	jq -n --argjson c "$checks" --argjson f "$n_fail" --argjson w "$n_warn" '{checked_at:(now|todate), ok:($f == 0), failures:$f, warnings:$w, checks:$c}'
 else

@@ -3,25 +3,21 @@ import Charts
 import SwiftUI
 
 struct StatusDot: View {
+	@Environment(\.colorScheme) private var scheme
 	enum Kind { case on, off, error, busy }
 	let kind: Kind
 	var body: some View {
+		let t = Theme(scheme)
+		let color: Color = { switch kind { case .on: return t.ok; case .off: return t.off; case .error: return t.bad; case .busy: return .clear } }()
 		Group {
 			if kind == .busy {
 				ProgressView().controlSize(.mini)
 			} else {
 				Circle().fill(color).frame(width: 8, height: 8)
+					.shadow(color: t.glow && kind == .on ? color.opacity(0.75) : .clear, radius: 4)
 			}
 		}
-		.frame(width: 12, height: 12)
-	}
-	private var color: Color {
-		switch kind {
-		case .on: return .green
-		case .off: return Color(nsColor: .tertiaryLabelColor)
-		case .error: return .red
-		case .busy: return .clear
-		}
+		.frame(width: 26, height: 26)
 	}
 }
 
@@ -35,8 +31,7 @@ struct ErrorLine: View {
 			Spacer(minLength: 0)
 			Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.borderless).controlSize(.small)
 		}
-		.padding(.horizontal, 10).padding(.vertical, 6)
-		.background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+		.notice(.red)
 	}
 }
 
@@ -60,8 +55,7 @@ struct UpdateLine: View {
 			Spacer(minLength: 6)
 			Button("Update", action: update).controlSize(.small)
 		}
-		.padding(.horizontal, 10).padding(.vertical, 6)
-		.background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+		.notice(Color.accentColor)
 	}
 }
 
@@ -101,8 +95,7 @@ struct StackUpgradeLine: View {
 				Button("Upgrade", action: upgradePatches).controlSize(.small).help("brew upgrade the patch releases, then restart what changed")
 			}
 		}
-		.padding(.horizontal, 10).padding(.vertical, 6)
-		.background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+		.notice(color)
 	}
 
 	private var symbol: String {
@@ -142,8 +135,7 @@ struct ReportsLine: View {
 			if let first = reports.first { Button("Open") { open(first) }.controlSize(.small).help("Open the newest report in Console") }
 			Button(action: dismiss) { Image(systemName: "xmark") }.buttonStyle(.borderless).controlSize(.small).help("Hide until new reports appear")
 		}
-		.padding(.horizontal, 10).padding(.vertical, 6)
-		.background((crashes.isEmpty ? Color.orange : Color.red).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+		.notice(crashes.isEmpty ? Color.orange : Color.red)
 	}
 }
 
@@ -168,70 +160,116 @@ struct RunawayLine: View {
 				}
 			}
 		}
-		.padding(.horizontal, 10).padding(.vertical, 6)
-		.background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+		.notice(Color.orange)
+	}
+}
+
+/// A public tunnel is up: where, for which sites, and the way to stop it.
+struct ShareLine: View {
+	let share: StackStatus.Share
+	let copy: (String) -> Void
+	let open: (String) -> Void
+	let stop: () -> Void
+	let busy: Bool
+
+	var body: some View {
+		HStack(alignment: .firstTextBaseline, spacing: 6) {
+			Image(systemName: "globe").foregroundStyle(Color.accentColor)
+			VStack(alignment: .leading, spacing: 1) {
+				Text("Sharing \((share.sites ?? [share.site ?? ""]).joined(separator: ", ")) publicly (\(share.mode ?? "tunnel") tunnel)").font(.caption.weight(.medium))
+				ForEach(share.urls ?? [share.url ?? ""], id: \.self) { u in
+					HStack(spacing: 4) {
+						Text(u).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+						Button { copy(u) } label: { Image(systemName: "doc.on.doc") }.buttonStyle(.borderless).controlSize(.mini).help("Copy URL")
+						Button { open(u) } label: { Image(systemName: "arrow.up.right.square") }.buttonStyle(.borderless).controlSize(.mini).help("Open")
+					}
+				}
+			}
+			Spacer(minLength: 6)
+			Button(busy ? "Stopping…" : "Stop", action: stop).controlSize(.small).disabled(busy)
+		}
+		.notice(Color.accentColor)
 	}
 }
 
 /// Summed CPU of php-fpm, nginx, mysqld, redis, memcached, mailpit and dnsmasq over the last three minutes.
 struct UsageChart: View {
+	@Environment(\.colorScheme) private var scheme
 	@ObservedObject var sampler: UsageSampler
 
 	var body: some View {
+		let t = Theme(scheme)
 		VStack(alignment: .leading, spacing: 4) {
 			HStack(alignment: .firstTextBaseline) {
-				Text("Stack load").font(.caption).foregroundStyle(.secondary)
+				Text("Stack load, last \(sampler.samples.count > 30 ? "hour" : "minutes")").font(.caption).foregroundStyle(t.muted)
 				Spacer()
-				if let s = sampler.samples.last {
-					Text("CPU \(s.cpu, specifier: "%.1f")%   ·   \(Int(s.memoryMB)) MB")
-						.font(.caption).monospacedDigit().foregroundStyle(.secondary)
+				if let s = sampler.samples.last, !s.byProcess.isEmpty {
+					Text(s.byProcess.sorted { $0.value > $1.value }.prefix(2).map { "\($0.key) \(String(format: "%.0f", $0.value))%" }.joined(separator: "  ·  "))
+						.font(.caption2).monospacedDigit().foregroundStyle(t.faint).lineLimit(1)
 				} else {
-					Text("sampling…").font(.caption).foregroundStyle(.tertiary)
+					Text("sampling…").font(.caption2).foregroundStyle(t.faint)
 				}
 			}
 			Chart(sampler.samples) { s in
 				AreaMark(x: .value("Time", s.time), y: .value("CPU", s.cpu))
 					.interpolationMethod(.monotone)
-					.foregroundStyle(.linearGradient(colors: [Color.accentColor.opacity(0.35), .clear], startPoint: .top, endPoint: .bottom))
+					.foregroundStyle(.linearGradient(colors: [t.accent.opacity(t.dark ? 0.30 : 0.22), .clear], startPoint: .top, endPoint: .bottom))
 				LineMark(x: .value("Time", s.time), y: .value("CPU", s.cpu))
 					.interpolationMethod(.monotone)
-					.lineStyle(StrokeStyle(lineWidth: 1.5))
-					.foregroundStyle(Color.accentColor)
+					.lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+					.foregroundStyle(t.accent)
 			}
 			.chartXAxis(.hidden)
 			.chartYAxis {
 				AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) {
-					AxisGridLine().foregroundStyle(Color.primary.opacity(0.08))
-					AxisValueLabel().font(.caption2).foregroundStyle(.tertiary)
+					AxisGridLine().foregroundStyle(t.divider)
+					AxisValueLabel().font(.system(size: 9, design: .rounded)).foregroundStyle(t.faint)
 				}
 			}
 			.chartYScale(domain: 0 ... max(5, (sampler.samples.map(\.cpu).max() ?? 0) * 1.25))
-			.frame(height: 56)
-			if let s = sampler.samples.last, !s.byProcess.isEmpty {
-				Text(s.byProcess.sorted { $0.value > $1.value }.prefix(4).map { "\($0.key) \(String(format: "%.1f", $0.value))%" }.joined(separator: "   "))
-					.font(.caption2).monospacedDigit().foregroundStyle(.tertiary).lineLimit(1)
-			}
+			.frame(height: 48)
 		}
 	}
 }
 
-/// A row in the panel lists: fixed left indicator, title/subtitle, trailing controls.
+/// A row in the panel lists: a 26-pt tile or dot, title/subtitle, trailing controls; hairline below.
 struct Row<Leading: View, Trailing: View>: View {
+	@Environment(\.colorScheme) private var scheme
 	let title: String
 	let subtitle: String
+	var star: Bool = false
 	@ViewBuilder var leading: Leading
 	@ViewBuilder var trailing: Trailing
 
 	var body: some View {
+		let t = Theme(scheme)
 		HStack(spacing: 10) {
 			leading
 			VStack(alignment: .leading, spacing: 1) {
-				Text(title).lineLimit(1)
-				Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+				HStack(spacing: 5) {
+					Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(t.text).lineLimit(1)
+					if star { Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(t.warn) }
+				}
+				Text(subtitle).font(.system(size: 11)).foregroundStyle(t.muted).lineLimit(1)
 			}
 			Spacer(minLength: 6)
 			trailing
 		}
-		.padding(.horizontal, 14).padding(.vertical, 6)
+		.padding(.horizontal, 12).padding(.vertical, 8)
+		.overlay(alignment: .bottom) { Rectangle().fill(t.divider).frame(height: 1).padding(.leading, 48) }
+	}
+}
+
+/// Right-aligned rounded numerals: a big figure with a small caption under it (sizes, counts).
+struct Figure: View {
+	@Environment(\.colorScheme) private var scheme
+	let value: String
+	var caption: String? = nil
+	var body: some View {
+		let t = Theme(scheme)
+		VStack(alignment: .trailing, spacing: 0) {
+			Text(value).font(.system(size: 12.5, weight: .bold, design: .rounded)).foregroundStyle(t.text.opacity(0.85)).monospacedDigit()
+			if let caption { Text(caption).font(.system(size: 10, weight: .semibold, design: .rounded)).foregroundStyle(t.faint) }
+		}
 	}
 }

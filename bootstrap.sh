@@ -360,6 +360,19 @@ PLIST
 	fi
 }
 
+# Every linked WordPress site gets the repo's mu-plugins (local SSL trust, one-time login, public share).
+ensure_mu_plugins() {
+	log "mu-plugins in every WordPress site"
+	local l t n=0
+	for l in "$VALET_HOME"/Sites/*; do
+		[ -L "$l" ] || continue
+		t="$(readlink "$l")"; [ -f "$t/wp-config.php" ] || continue
+		# shellcheck source=bin/lib.sh
+		( source "$REPO_DIR/bin/lib.sh"; install_mu_plugins "$t" ) && n=$((n+1))
+	done
+	ok "$n WordPress sites carry $(ls "$REPO_DIR"/mu-plugins/*.php | wc -l | tr -d ' ') mu-plugins"
+}
+
 # The global `devstack` command (bin/devstack) and its zsh completion. A symlink, so `git pull` updates it.
 ensure_cli() {
 	log "devstack command"
@@ -394,6 +407,7 @@ ensure_phpmyadmin
 ensure_log_pruning
 ensure_stack_upgrades
 ensure_watchdog
+ensure_mu_plugins
 ensure_cli
 if [ "1" = "$WITH_APP" ]; then log "Menu-bar app"; "$REPO_DIR/bin/app" install; fi
 log "Done. devstack help lists every command; devstack app install builds the menu-bar app."

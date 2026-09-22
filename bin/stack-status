@@ -46,12 +46,13 @@ sites="$(for l in "$VALET_HOME"/Sites/*; do
 	# PHP fatals WordPress logged today or yesterday (debug.log is rotated, so its tail is enough).
 	fatals=0; dlog="$target/wp-content/debug.log"
 	if [ -f "$dlog" ]; then fatals="$(tail -n 3000 "$dlog" | /usr/bin/grep -cE "^\[($today|$yday)[^]]*\] PHP (Fatal|Parse) error" || true)"; else dlog=""; fi
+	ocache=""; if [ -f "$target/wp-content/object-cache.php" ]; then ocache="$(head -20 "$target/wp-content/object-cache.php" | grep -qi redis && echo redis || { head -20 "$target/wp-content/object-cache.php" | grep -qi memcache && echo memcached || echo other; })"; fi
 	dbn=""; [ "true" = "$wp" ] && dbn="$(sed -nE "s/.*define\( *['\"]DB_NAME['\"], *['\"]([^'\"]+)['\"].*/\1/p" "$target/wp-config.php" 2> /dev/null | head -1 || true)"
 	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" --argjson prot "$prot" --argjson fatals "${fatals:-0}" --arg dlog "$dlog" \
-		--arg dbn "$dbn" --argjson dbs "$db_sizes" --argjson fs "$folder_sizes" --argjson favs "$favorites" \
+		--arg dbn "$dbn" --argjson dbs "$db_sizes" --argjson fs "$folder_sizes" --argjson favs "$favorites" --arg ocache "$ocache" \
 		'{name:$name,php:$php,secured:$secured,wp:$wp,path:$path,protected:$prot,fatals_recent:$fatals,debug_log:(if $dlog == "" then null else $dlog end),
 		  db:(if $dbn == "" then null else $dbn end), db_bytes:(if $dbn == "" then null else ($dbs[$dbn] // null) end), files_bytes:($fs.sites[$name] // null),
-		  favorite:($favs | index($name) != null)}'
+		  favorite:($favs | index($name) != null), object_cache:(if $ocache == "" then null else $ocache end)}'
 done | jq -s 'sort_by(.name)')"
 
 # Port owner: when several processes listen (Docker's *:6379 beside Homebrew's 127.0.0.1:6379), prefer the
@@ -86,7 +87,9 @@ fi
 upgrades="$(jq -c '.' "$DATA_DIR/upgrades.json" 2> /dev/null || echo null)"
 # What the five-minute watchdog last did (bin/watchdog).
 watchdog="$(jq -c '.' "$DATA_DIR/watchdog.json" 2> /dev/null || echo null)"
+# Public tunnel (bin/site-share): only while its process is alive.
+share=null; if p="$(jq -r '.pid // empty' "$DATA_DIR/share.json" 2> /dev/null)" && [ -n "$p" ] && kill -0 "$p" 2> /dev/null; then share="$(jq -c '.' "$DATA_DIR/share.json")"; fi
 
-jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" --argjson upgrades "$upgrades" --argjson watchdog "$watchdog" --argjson fs "$folder_sizes" \
-	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail, upgrades:$upgrades, watchdog:$watchdog,
+jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" --argjson upgrades "$upgrades" --argjson watchdog "$watchdog" --argjson fs "$folder_sizes" --argjson share "$share" \
+	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail, upgrades:$upgrades, watchdog:$watchdog, share:$share,
 	  sizes:{computed_at:$fs.computed_at, files_total:([$sites[].files_bytes // 0] | add), db_total:([$sites[].db_bytes // 0] | add)}}'

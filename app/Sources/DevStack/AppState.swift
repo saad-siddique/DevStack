@@ -83,7 +83,7 @@ final class AppState: ObservableObject {
 
 	init() {
 		if !installed { errorMessage = Devstack.Failure.notInstalled.localizedDescription }
-		sampler.start(interval: 60)
+		sampler.start(interval: UserDefaults.standard.bool(forKey: "menubar.graph") ? 15 : 60)
 		Task { await refresh() }
 		schedule()
 		scheduleUpdateChecks()
@@ -151,7 +151,7 @@ final class AppState: ObservableObject {
 
 	func panelDidDisappear() {
 		panelOpen = false
-		sampler.start(interval: 60)
+		sampler.start(interval: menuBarGraph ? 15 : 60)
 		schedule()
 	}
 
@@ -366,6 +366,19 @@ final class AppState: ObservableObject {
 	}
 
 	func refreshSizes() { runJob(title: "Measure site folders", ["sizes", "--refresh", "--json"]) }
+	// Public URL through Cloudflare (bin/site-share). Starting is quick (seconds) but the result is a URL, so it runs
+	// as a quick action and the panel shows the share line from status.
+	func share(_ site: Site) async {
+		await quick("share", ["share", site.name, "--json"], label: "Sharing \(site.name) publicly")
+		if let url = status?.share?.url, !url.isEmpty { copy(url); open(url) }
+	}
+	func stopSharing() async { await quick("share", ["share", "--stop", "--json"], label: "Public sharing stopped") }
+	func setCache(_ site: Site, _ backend: String) { runJob(title: "\(site.name): object cache \(backend)", ["cache", site.name, backend, "--json"]) }
+	func savePoint(_ site: Site) { runJob(title: "Save point: \(site.name) database", ["backup", site.name, "--db-only", "--label", "save point", "--json"]) }
+	func rollBack(_ b: BackupEntry) { runJob(title: "Roll back \(b.name) database", ["restore", b.name, "--from", b.path, "--db-only", "--json"]) }
+	@Published var menuBarGraph: Bool = UserDefaults.standard.bool(forKey: "menubar.graph") {
+		didSet { UserDefaults.standard.set(menuBarGraph, forKey: "menubar.graph"); sampler.start(interval: panelOpen ? 3 : (menuBarGraph ? 15 : 60)) }
+	}
 	func toggleFavorite(_ site: Site) async { await quick("fav:" + site.name, ["favorite", site.name, site.isFavorite ? "off" : "on", "--json"]) }
 
 	private func runJob(title: String, _ args: [String]) {

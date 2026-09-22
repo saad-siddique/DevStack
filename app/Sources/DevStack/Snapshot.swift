@@ -19,7 +19,11 @@ enum Snapshot {
 		try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 		state.sampler.start(interval: 3)
 		try? await Task.sleep(for: .seconds(7))          // a few load samples so the chart has a line
+		NSApp.appearance = NSAppearance(named: .aqua)
 		await capture(PanelView().environmentObject(state), "panel", dir)
+		NSApp.appearance = NSAppearance(named: .darkAqua)
+		await capture(PanelView().environmentObject(state), "panel-dark", dir)
+		NSApp.appearance = NSAppearance(named: .aqua)
 		state.setUpdate(UpdateInfo(behind: 3, appChanged: true, dirty: false, reachable: true,
 		                           commits: ["a1b2c3d Import: accept .sql.gz dumps", "b2c3d4e App: Xdebug switch per PHP version", "c3d4e5f README: LocalWP export steps"]))
 		await capture(PanelView().environmentObject(state), "panel-update", dir)
@@ -34,9 +38,10 @@ enum Snapshot {
 		await capture(PanelView().environmentObject(state), "panel-upgrades", dir)
 		state.freeze(with: fixture)
 		state.setBackups([
-			BackupEntry(name: "acme-shop", created: "2026-09-22T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260922-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, filesArchive: nil, sizeBytes: 277_618_688),
-			BackupEntry(name: "acme-shop", created: "2026-09-21T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260921-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, filesArchive: nil, sizeBytes: 271_000_000),
-			BackupEntry(name: "old-landing", created: "2026-09-18T17:40:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/old-landing/20260918-174000", php: "php@7.4", db: "wp_old_landing", tables: 12, dbDump: "db.sql.gz", files: true, filesArchive: "files.tar.zst", sizeBytes: 31_000_000),
+			BackupEntry(name: "acme-shop", created: "2026-09-22T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260922-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, filesArchive: nil, label: nil, sizeBytes: 277_618_688),
+			BackupEntry(name: "acme-shop", created: "2026-09-22T09:40:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260922-094000", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: false, filesArchive: nil, label: "before recipe test", sizeBytes: 340_000),
+			BackupEntry(name: "acme-shop", created: "2026-09-21T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260921-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, filesArchive: nil, label: nil, sizeBytes: 271_000_000),
+			BackupEntry(name: "old-landing", created: "2026-09-18T17:40:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/old-landing/20260918-174000", php: "php@7.4", db: "wp_old_landing", tables: 12, dbDump: "db.sql.gz", files: true, filesArchive: "files.tar.zst", label: nil, sizeBytes: 31_000_000),
 		])
 		state.modal = .backups(nil)
 		await capture(ModalView().environmentObject(state), "backups", dir)
@@ -67,6 +72,7 @@ enum Snapshot {
 		func site(_ n: String, _ php: String, wp: Bool = true, protected: Bool = false, files: Int = 900_000_000, db: Int = 60_000_000) -> Site {
 			Site(name: n, php: php, secured: true, wp: wp, path: "\(home)/Sites/\(n)", protected: protected, fatalsRecent: n == "client-blog" ? 2 : 0,
 			     debugLog: wp ? "\(home)/Sites/\(n)/wp-content/debug.log" : nil, favorite: n == "plugin-dev" || n == "client-blog",
+			     objectCache: n == "acme-shop" ? "redis" : nil,
 			     db: wp ? "wp_\(n.replacingOccurrences(of: "-", with: "_"))" : nil,
 			     dbBytes: wp ? db : nil, filesBytes: files)
 		}
@@ -89,7 +95,8 @@ enum Snapshot {
 			mysql: MySQLInfo(version: "8.4.6", qps: 0.4),
 			mail: MailInfo(backend: "mailpit", total: 3),
 			upgrades: nil, watchdog: nil,
-			sizes: StackStatus.Sizes(computedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600 * 10)), filesTotal: 32_500_000_000, dbTotal: 5_538_000_000))
+			sizes: StackStatus.Sizes(computedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600 * 10)), filesTotal: 32_500_000_000, dbTotal: 5_538_000_000),
+			share: nil)
 	}
 
 	private static func capture<V: View>(_ view: V, _ name: String, _ dir: String) async {

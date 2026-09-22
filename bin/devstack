@@ -30,6 +30,8 @@ Sites
   devstack sites                                every linked site with its PHP version
   devstack sizes [--refresh]                    folder size per site (refresh walks the disk; the nightly run does too)
   devstack favorite <name> [on|off]             pin a site to the top of the Sites list (app and dashboard)
+  devstack cache <name> redis|memcached|off     persistent object cache for one site (per-site key prefix)
+  devstack share <name> [--hostname H] | --stop public URL through Cloudflare (named tunnel from ~/.cloudflared, else quick)
   devstack php <name> <7.4|8.2|…|default>       switch the PHP version one site runs on
   devstack login <name> [--user U] [--print]    open wp-admin already signed in (one-time link, 60 s)
   devstack open [dashboard|phpmyadmin|mailpit|<site>]
@@ -37,7 +39,8 @@ Sites
 
 Stack
   devstack status [--json]                      services, PHP versions, sites, ports, MySQL, mail
-  devstack doctor [--json]                      check everything and say what is wrong (and how to fix it)
+  devstack doctor [--fix] [--json]              check everything; --fix starts stopped services and re-runs bootstrap for gaps
+  devstack uninstall --yes [--purge]            remove DevStack from this Mac (sites, databases and backups stay)
   devstack watchdog                             restart nginx/dnsmasq if launchd lost them (runs every 5 min by itself)
   devstack service <name> start|stop|restart    nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
   devstack xdebug on|off|status [--php 8.4]     trigger mode, port 9003
@@ -79,12 +82,15 @@ case "$cmd" in
 	archive)             exec "$BIN/site-remove" "$1" --yes --backup "${@:2}" ;;   # [--compress] passes through
 	sizes)               exec "$BIN/site-sizes" "$@" ;;
 	favorite|fav|star)   exec "$BIN/site-favorite" "$@" ;;
+	cache)               exec "$BIN/site-cache" "$@" ;;
+	share)               exec "$BIN/site-share" "$@" ;;
 	restore)             exec "$BIN/site-restore" "$@" ;;
 	clone)               exec "$BIN/site-clone" "$@" ;;
 	watchdog)            exec "$BIN/watchdog" "$@" ;;
 	login)               exec "$BIN/site-login" "$@" ;;
 	php)                 exec "$BIN/site-php" "$@" ;;
 	doctor)              exec "$BIN/doctor" "$@" ;;
+	uninstall)           exec "$BIN/uninstall" "$@" ;;
 	sites)               exec "$BIN/stack-status" | jq -r '.sites[] | "\(.name)\t\(.php)\t\(if .secured then "https" else "http" end)\t\(if .protected then "protected" else "" end)"' | column -t -s $'\t' ;;
 	xdebug)              exec "$BIN/php-xdebug" "$@" ;;
 	service|svc)         exec "$BIN/service" "$@" ;;

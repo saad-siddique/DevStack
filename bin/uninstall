@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# uninstall --yes [--purge]
+# Takes DevStack off this Mac: the app, the three LaunchAgents, any share tunnel, Valet (nginx, dnsmasq, resolver,
+# certificates), the data services, the devstack command and completion. Sites in ~/Sites, MySQL data and backups
+# stay. --purge also removes ~/.local/share/devstack (phpMyAdmin, settings, caches). Homebrew formulae stay installed;
+# the last line prints the brew command that removes them.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+YES=0; PURGE=0
+for arg in "$@"; do case "$arg" in --yes) YES=1 ;; --purge) PURGE=1 ;; *) die "usage: uninstall --yes [--purge]" ;; esac; done
+[ "1" = "$YES" ] || die "refusing without --yes (stops every service and removes Valet's nginx/dnsmasq setup; sites and databases stay)"
+
+log "menu-bar app"; "$REPO_DIR/bin/app" uninstall 2> /dev/null || true
+log "share tunnel"; "$REPO_DIR/bin/site-share" --stop > /dev/null 2>&1 || true
+log "LaunchAgents"
+for a in logs-prune upgrade watchdog; do
+	launchctl bootout "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 || true
+	rm -f "$HOME/Library/LaunchAgents/com.devstack.$a.plist"
+done
+log "Valet (nginx, dnsmasq, /etc/resolver/$TLD, certificates)"
+valet uninstall --force > /dev/null 2>&1 || log "warning: valet uninstall failed; run it by hand"
+log "data services"
+for s in mysql@8.4 mailpit redis memcached; do "$BREW_PREFIX/bin/brew" services stop "$s" > /dev/null 2>&1 || true; done
+log "devstack command"
+rm -f "$BREW_PREFIX/bin/devstack" "$BREW_PREFIX/share/zsh/site-functions/_devstack"
+if [ "1" = "$PURGE" ]; then rm -rf "$DATA_DIR"; log "removed $DATA_DIR"; fi
+cat <<MSG
+
+DevStack is off this Mac. Still here on purpose:
+  ~/Sites (your files), $BREW_PREFIX/var/mysql (databases), ~/Backups/DevStack, ~/Library/Logs/DevStack$([ "1" = "$PURGE" ] || printf ', %s' "$DATA_DIR")
+To remove the Homebrew formulae too:
+  brew uninstall $(sed -nE 's/^brew "([^"]+)".*/\1/p' "$REPO_DIR/Brewfile" | tr '\n' ' ')
+MSG

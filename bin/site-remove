@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# site-remove <name> --yes [--backup [--compress]] [--keep-files] [--keep-db]
+# site-remove <name> --yes [--backup [--no-compress]] [--keep-files] [--keep-db]
 # Unsecure + unlink from Valet, drop the site's database and DB user (read from wp-config), delete the folder.
-# --backup runs site-backup first and aborts if that fails (what the menu-bar app does by default).
+# --backup (= devstack archive) runs site-backup --compress first and aborts if that fails: an archive exists to free
+# the disk, and a clone would keep the site's blocks alive. --no-compress keeps the instant clone instead.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-NAME="" ; YES=0 ; BACKUP=0 ; COMPRESS=0 ; KEEP_FILES=0 ; KEEP_DB=0
+NAME="" ; YES=0 ; BACKUP=0 ; COMPRESS=1 ; KEEP_FILES=0 ; KEEP_DB=0
 for arg in "$@"; do
 	case "$arg" in
-		--yes) YES=1 ;; --backup) BACKUP=1 ;; --compress) COMPRESS=1 ;; --keep-files) KEEP_FILES=1 ;; --keep-db) KEEP_DB=1 ;;
+		--yes) YES=1 ;; --backup) BACKUP=1 ;; --compress) COMPRESS=1 ;; --no-compress) COMPRESS=0 ;; --keep-files) KEEP_FILES=1 ;; --keep-db) KEEP_DB=1 ;;
 		--*) die "unknown flag $arg" ;;
 		*) NAME="$arg" ;;
 	esac

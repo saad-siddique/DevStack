@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevStack panel — three design directions</title>
+<link rel="icon" href="../favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Nunito:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --paper:#f2f3f5; --ink:#1b222b; --muted:#6b7683; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; }
+header { padding: 40px 32px 8px; max-width: 1380px; margin: 0 auto; }
+header h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); max-width: 70ch; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(380px, 1fr)); gap: 32px; padding: 24px 32px 64px; max-width: 1380px; margin: 0 auto; }
+@media (max-width: 1240px) { .grid { grid-template-columns: 1fr; } }
+.option h2 { margin: 0 0 4px; font-size: 18px; }
+.option .why { margin: 0 0 16px; color: var(--muted); font-size: 14px; min-height: 66px; }
+.option ul { margin: 14px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
+.option ul li { margin: 3px 0; }
+.frame { width: 400px; border-radius: 14px; overflow: hidden; box-shadow: 0 30px 60px -20px rgba(20,30,40,.35), 0 0 0 1px rgba(0,0,0,.06); }
+
+/* ---------- A. Ledger: light, one teal accent, rules not boxes, tabular numerals ---------- */
+.a { background: #fbfbfa; color: #17202a; font-family: "IBM Plex Sans", -apple-system, sans-serif; font-size: 13px; }
+.a .top { padding: 16px 16px 12px; border-bottom: 1px solid #e3e6e8; display: flex; justify-content: space-between; align-items: baseline; }
+.a .top b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.a .top span { color: #5f6b78; }
+.a .quick { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid #e3e6e8; }
+.a .quick div { padding: 10px 12px; text-align: center; color: #0f6473; font-weight: 500; border-right: 1px solid #e3e6e8; }
+.a .quick div:last-child { border-right: 0; }
+.a .load { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #e3e6e8; align-items: end; }
+.a .load svg { width: 100%; height: 36px; display: block; }
+.a .load .n { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: #5f6b78; text-align: right; line-height: 1.35; }
+.a .load .n b { color: #17202a; font-weight: 500; }
+.a .tabs { display: flex; gap: 18px; padding: 10px 16px 0; border-bottom: 1px solid #e3e6e8; }
+.a .tabs span { padding-bottom: 8px; color: #5f6b78; }
+.a .tabs span.on { color: #0f6473; border-bottom: 2px solid #0f6473; font-weight: 500; }
+.a .row { display: grid; grid-template-columns: 8px 1fr auto; gap: 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid #eef0f2; }
+.a .row .dot { width: 8px; height: 8px; border-radius: 50%; background: #2e9d63; }
+.a .row .dot.bad { background: #d24d3a; }
+.a .row .name { font-weight: 500; }
+.a .row .name small { display: block; color: #6b7683; font-weight: 400; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; margin-top: 1px; }
+.a .row .meta { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: #6b7683; text-align: right; }
+.a .row .meta b { color: #17202a; font-weight: 500; display: block; }
+.a .foot { display: flex; justify-content: space-between; padding: 10px 16px; color: #5f6b78; font-size: 12px; border-top: 1px solid #e3e6e8; }
+.a .foot b { color: #0f6473; font-weight: 500; }
+
+/* ---------- B. Console: dark graphite, mono site names, LEDs, dense ---------- */
+.b { background: #14181d; color: #d7dde4; font-family: -apple-system, "SF Pro Text", sans-serif; font-size: 13px; }
+.b .top { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: #1a1f26; border-bottom: 1px solid #262d36; }
+.b .top b { font-size: 14px; font-weight: 600; color: #fff; }
+.b .top .leds { display: flex; gap: 6px; }
+.b .top .leds i { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 8px #3ddc8488; display: inline-block; }
+.b .quick { display: flex; gap: 8px; padding: 12px 16px 0; }
+.b .quick div { flex: 1; text-align: center; padding: 8px 0; background: #1f262e; border: 1px solid #2b333d; border-radius: 6px; color: #9ecbd3; font-weight: 500; }
+.b .load { margin: 12px 16px; padding: 12px; background: #0f1216; border: 1px solid #262d36; border-radius: 8px; }
+.b .load .hdr { display: flex; justify-content: space-between; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: #7f8b98; margin-bottom: 6px; }
+.b .load .hdr b { color: #3ddc84; font-weight: 500; }
+.b .load svg { width: 100%; height: 44px; display: block; }
+.b .tabs { display: flex; padding: 0 16px; gap: 2px; }
+.b .tabs span { flex: 1; text-align: center; padding: 7px; background: #1a1f26; color: #7f8b98; border-radius: 6px 6px 0 0; font-size: 12px; }
+.b .tabs span.on { background: #262d36; color: #fff; }
+.b .row { display: grid; grid-template-columns: 10px 1fr auto; gap: 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid #1f262e; }
+.b .row i { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 6px #3ddc8466; }
+.b .row i.bad { background: #ff6b5c; box-shadow: 0 0 6px #ff6b5c66; }
+.b .row .name { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: #eef2f6; }
+.b .row .name small { display: block; font-family: -apple-system, sans-serif; color: #7f8b98; font-size: 11.5px; margin-top: 2px; }
+.b .row .meta { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: #7f8b98; text-align: right; }
+.b .row .meta b { color: #d7dde4; display: block; font-weight: 500; }
+.b .foot { display: flex; justify-content: space-between; padding: 10px 16px; font-size: 12px; color: #7f8b98; background: #1a1f26; }
+.b .foot b { color: #9ecbd3; font-weight: 500; }
+
+/* ---------- C. Glass: macOS materials, grouped cards, rounded friendly numerals ---------- */
+.c { background: linear-gradient(180deg, #e9eef2 0%, #eef1f4 100%); color: #1c2733; font-family: -apple-system, "SF Pro Text", sans-serif; font-size: 13px; }
+.c .hero { padding: 16px 16px 14px; background: linear-gradient(135deg, #1f4a72 0%, #0f6473 60%, #0a2c44 100%); color: #fff; display: flex; gap: 12px; align-items: center; }
+.c .hero .glyph { width: 34px; height: 34px; border-radius: 9px; background: rgba(255,255,255,.14); display: grid; place-items: center; }
+.c .hero .glyph svg { width: 20px; height: 20px; }
+.c .hero b { display: block; font-size: 15px; font-weight: 600; }
+.c .hero span { font-size: 12px; opacity: .8; font-family: "Nunito", -apple-system, sans-serif; font-weight: 600; }
+.c .hero .cpu { margin-left: auto; text-align: right; font-family: "Nunito", sans-serif; font-weight: 700; font-size: 15px; }
+.c .hero .cpu small { display: block; font-weight: 600; font-size: 11px; opacity: .75; }
+.c .card { margin: 12px 12px 0; background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.9); box-shadow: 0 1px 2px rgba(20,30,40,.06), 0 8px 24px -16px rgba(20,30,40,.25); border-radius: 12px; overflow: hidden; backdrop-filter: blur(20px); }
+.c .quick { display: grid; grid-template-columns: repeat(3,1fr); }
+.c .quick div { padding: 11px 8px; text-align: center; color: #0f6473; font-weight: 600; font-size: 12.5px; }
+.c .quick div + div { border-left: 1px solid #e6ebef; }
+.c .load { padding: 10px 14px 6px; }
+.c .load svg { width: 100%; height: 40px; display: block; }
+.c .seg { display: flex; margin: 12px 12px 0; padding: 3px; background: rgba(0,0,0,.05); border-radius: 9px; }
+.c .seg span { flex: 1; text-align: center; padding: 5px; border-radius: 7px; color: #55636f; font-weight: 500; font-size: 12.5px; }
+.c .seg span.on { background: #fff; color: #1c2733; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.c .row { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #eef1f4; }
+.c .row .ic { width: 26px; height: 26px; border-radius: 8px; background: #e6f4f3; color: #0f6473; display: grid; place-items: center; font-weight: 700; font-size: 12px; font-family: "Nunito", sans-serif; }
+.c .row .ic.bad { background: #fde8e6; color: #c93a2b; }
+.c .row .name { font-weight: 600; }
+.c .row .name small { display: block; color: #6b7683; font-weight: 400; font-size: 11.5px; margin-top: 1px; }
+.c .row .meta { font-family: "Nunito", sans-serif; font-weight: 700; color: #3c4a57; font-size: 12.5px; text-align: right; }
+.c .row .meta small { display: block; font-weight: 600; color: #8a96a3; font-size: 11px; }
+.c .foot { display: flex; justify-content: space-between; padding: 12px 16px; font-size: 12px; color: #6b7683; }
+.c .foot b { color: #0f6473; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+	<h1>DevStack panel: three directions</h1>
+	<p>Same data in each (7 sites, one with fatals, one favourite). Pick one and it becomes the app's look, dark mode included. The dashboard follows the same tokens.</p>
+</header>
+<div class="grid">
+
+<section class="option">
+	<h2>A · Ledger</h2>
+	<p class="why">Light, quiet, spreadsheet-clear. One teal accent from the icon, hairline rules instead of boxes, monospace numerals so sizes and versions line up. Status is a word or a dot, never a badge parade.</p>
+	<div class="frame a">
+		<div class="top"><b>DevStack</b><span>6 / 6 up · 7 sites · PHP 8.4</span></div>
+		<div class="quick"><div>Dashboard</div><div>phpMyAdmin</div><div>Mailpit · 3</div></div>
+		<div class="load">
+			<svg viewBox="0 0 300 36" preserveAspectRatio="none"><path d="M0 30 C30 28 40 22 60 24 S100 12 120 16 S160 30 180 26 S220 6 240 10 S280 24 300 22" fill="none" stroke="#0f6473" stroke-width="1.5"/><path d="M0 30 C30 28 40 22 60 24 S100 12 120 16 S160 30 180 26 S220 6 240 10 S280 24 300 22 V36 H0 Z" fill="#0f6473" opacity=".08"/></svg>
+			<div class="n">cpu <b>2.4%</b><br>mem <b>612 MB</b></div>
+		</div>
+		<div class="tabs"><span class="on">Sites</span><span>Services</span><span>PHP</span><span>Backups</span></div>
+		<div class="row"><i class="dot"></i><div class="name">plugin-dev ★<small>php 8.4 · redis · protected</small></div><div class="meta"><b>13.3 GB</b>1.6 GB db</div></div>
+		<div class="row"><i class="dot bad"></i><div class="name">client-blog ★<small>php 8.2 · 2 fatals today</small></div><div class="meta"><b>650 MB</b>38 MB db</div></div>
+		<div class="row"><i class="dot"></i><div class="name">acme-shop<small>php 8.4</small></div><div class="meta"><b>2.4 GB</b>410 MB db</div></div>
+		<div class="row"><i class="dot"></i><div class="name">company-docs<small>php 7.4</small></div><div class="meta"><b>1.1 GB</b>120 MB db</div></div>
+		<div class="row"><i class="dot"></i><div class="name">landing-page<small>static</small></div><div class="meta"><b>45 MB</b>&nbsp;</div></div>
+		<div class="row"><i class="dot"></i><div class="name">legacy-intranet<small>php 7.4</small></div><div class="meta"><b>7.8 GB</b>1.6 GB db</div></div>
+		<div class="foot"><span><b>+ New site</b> &nbsp; <b>Import</b></span><span>32.5 GB · 5.5 GB db</span></div>
+	</div>
+	<ul><li>Best for scanning 25+ sites at a glance.</li><li>Dark mode: same rules on graphite, teal stays.</li><li>Least "app-like"; most information per pixel.</li></ul>
+</section>
+
+<section class="option">
+	<h2>B · Console</h2>
+	<p class="why">Dark graphite, monospace site names, glowing LEDs, a proper oscilloscope for the load. Feels like the tool it is: a control panel for servers. Dense, high contrast, no chrome.</p>
+	<div class="frame b">
+		<div class="top"><b>DevStack</b><div class="leds"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+		<div class="quick"><div>Dashboard</div><div>phpMyAdmin</div><div>Mailpit 3</div></div>
+		<div class="load">
+			<div class="hdr"><span>stack load · 3 min</span><b>2.4% · 612 MB</b></div>
+			<svg viewBox="0 0 300 44" preserveAspectRatio="none"><path d="M0 36 C30 34 40 26 60 28 S100 12 120 18 S160 36 180 30 S220 6 240 12 S280 28 300 26" fill="none" stroke="#3ddc84" stroke-width="1.5"/><path d="M0 36 C30 34 40 26 60 28 S100 12 120 18 S160 36 180 30 S220 6 240 12 S280 28 300 26 V44 H0 Z" fill="#3ddc84" opacity=".12"/></svg>
+		</div>
+		<div class="tabs"><span class="on">sites</span><span>services</span><span>php</span><span>backups</span></div>
+		<div class="row"><i></i><div class="name">plugin-dev ★<small>8.4 · redis · protected</small></div><div class="meta"><b>13.3G</b>1.6G db</div></div>
+		<div class="row"><i class="bad"></i><div class="name">client-blog ★<small>8.2 · 2 fatals</small></div><div class="meta"><b>650M</b>38M db</div></div>
+		<div class="row"><i></i><div class="name">acme-shop<small>8.4</small></div><div class="meta"><b>2.4G</b>410M db</div></div>
+		<div class="row"><i></i><div class="name">company-docs<small>7.4</small></div><div class="meta"><b>1.1G</b>120M db</div></div>
+		<div class="row"><i></i><div class="name">landing-page<small>static</small></div><div class="meta"><b>45M</b>&nbsp;</div></div>
+		<div class="row"><i></i><div class="name">legacy-intranet<small>7.4</small></div><div class="meta"><b>7.8G</b>1.6G db</div></div>
+		<div class="foot"><span><b>+ new</b> &nbsp; <b>import</b></span><span>32.5G · 5.5G db</span></div>
+	</div>
+	<ul><li>Best if you live in the terminal and like density.</li><li>Light mode would be a second, lighter graphite, not white.</li><li>Most distinctive; least conventional for a menu-bar app.</li></ul>
+</section>
+
+<section class="option">
+	<h2>C · Glass</h2>
+	<p class="why">Native macOS: a gradient header carrying the icon and the load, translucent grouped cards, a segmented control, rounded friendly numerals. Reads like a first-party utility from the current macOS.</p>
+	<div class="frame c">
+		<div class="hero">
+			<div class="glyph"><svg viewBox="0 0 36 36"><path d="M18 4.5 L31.5 11.25 L18 18 L4.5 11.25 Z" fill="#fff"/><path d="M5 17.5 L18 24 L31 17.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".6"/><path d="M5 23.5 L18 30 L31 23.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".35"/></svg></div>
+			<div><b>DevStack</b><span>All 6 services running · 7 sites</span></div>
+			<div class="cpu">2.4%<small>612 MB</small></div>
+		</div>
+		<div class="card quick"><div>Dashboard</div><div>phpMyAdmin</div><div>Mailpit (3)</div></div>
+		<div class="card load"><svg viewBox="0 0 300 40" preserveAspectRatio="none"><path d="M0 32 C30 30 40 24 60 26 S100 12 120 16 S160 32 180 28 S220 6 240 10 S280 26 300 24" fill="none" stroke="#0f6473" stroke-width="2"/><path d="M0 32 C30 30 40 24 60 26 S100 12 120 16 S160 32 180 28 S220 6 240 10 S280 26 300 24 V40 H0 Z" fill="url(#g)" opacity=".18"/><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f6473"/><stop offset="1" stop-color="#0f6473" stop-opacity="0"/></linearGradient></defs></svg></div>
+		<div class="seg"><span class="on">Sites</span><span>Services</span><span>PHP</span><span>Backups</span></div>
+		<div class="card">
+			<div class="row"><div class="ic">P</div><div class="name">plugin-dev ★<small>PHP 8.4 · Redis · protected</small></div><div class="meta">13.3 GB<small>1.6 GB db</small></div></div>
+			<div class="row"><div class="ic bad">!</div><div class="name">client-blog ★<small>PHP 8.2 · 2 fatals today</small></div><div class="meta">650 MB<small>38 MB db</small></div></div>
+			<div class="row"><div class="ic">A</div><div class="name">acme-shop<small>PHP 8.4</small></div><div class="meta">2.4 GB<small>410 MB db</small></div></div>
+			<div class="row"><div class="ic">C</div><div class="name">company-docs<small>PHP 7.4</small></div><div class="meta">1.1 GB<small>120 MB db</small></div></div>
+			<div class="row"><div class="ic">L</div><div class="name">landing-page<small>Static</small></div><div class="meta">45 MB<small>&nbsp;</small></div></div>
+			<div class="row"><div class="ic">L</div><div class="name">legacy-intranet<small>PHP 7.4</small></div><div class="meta">7.8 GB<small>1.6 GB db</small></div></div>
+		</div>
+		<div class="foot"><span><b>＋ New site</b> &nbsp; <b>Import</b></span><span>32.5 GB · 5.5 GB db</span></div>
+	</div>
+	<ul><li>Best if it should feel like part of macOS.</li><li>Dark mode comes free from system materials.</li><li>Most work to build (materials, hero, per-site glyphs); least dense.</li></ul>
+</section>
+
+</div>
+</body>
+</html>

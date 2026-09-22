@@ -10,7 +10,7 @@ _devstack() {
 	local -a cmds
 	cmds=(
 		'new:fresh WordPress site' 'import:import a LocalWP export, folder or backup' 'backup:back up a site'
-		'backups:list or prune backups' 'archive:back up then remove a site' 'restore:recreate a site from its backup' 'clone:copy a site under a new name' 'remove:remove a site' 'watchdog:restart nginx/dnsmasq if lost' 'sizes:folder size per site' 'favorite:pin a site to the top' 'sites:list linked sites' 'login:open wp-admin signed in' 'php:switch a site PHP version' 'doctor:check the stack' 'open:open a site or tool in the browser'
+		'backups:list or prune backups' 'archive:back up then remove a site' 'restore:recreate a site from its backup' 'clone:copy a site under a new name' 'remove:remove a site' 'watchdog:restart nginx/dnsmasq if lost' 'sizes:folder size per site' 'favorite:pin a site to the top' 'cache:object cache per site' 'share:public URL through Cloudflare' 'sites:list linked sites' 'login:open wp-admin signed in' 'php:switch a site PHP version' 'doctor:check the stack' 'uninstall:remove DevStack from this Mac' 'open:open a site or tool in the browser'
 		'migrate:migrate one MAMP host' 'migrate-all:migrate every non-protected host'
 		'status:stack status JSON' 'service:start/stop/restart a service' 'xdebug:toggle Xdebug per PHP version'
 		'logs:tail stack logs' 'logs-prune:rotate logs now'
@@ -22,6 +22,8 @@ _devstack() {
 		remove|rm|backup|migrate|login|archive|restore|clone) (( CURRENT == 3 )) && _devstack_sites || _arguments '--yes' '--backup' '--keep-files' '--keep-db' '--db-only' '--files-only' '--user' '--print' '--replace' '--from:dir:_files -/' '--php' '--compress' '--json' ;;
 		sizes) _arguments '--refresh' '--json' ;;
 		favorite|fav|star) (( CURRENT == 3 )) && _devstack_sites || { local -a o; o=( on off toggle ); _describe 'state' o; } ;;
+		share) (( CURRENT == 3 )) && { _devstack_sites; _arguments '--stop' '--status'; } || _arguments '--hostname' '--json' ;;
+		cache) (( CURRENT == 3 )) && _devstack_sites || { local -a o; o=( redis memcached off status ); _describe 'backend' o; } ;;
 		backups) (( CURRENT == 3 )) && { _devstack_sites; _arguments '--prune' '--delete:dir:_files -/'; } || _arguments '--keep' '--older-than' '--dry-run' '--json' ;;
 		open) local -a t; t=( dashboard phpmyadmin mailpit ); _describe 'target' t; _devstack_sites ;;
 		new) (( CURRENT == 3 )) || _arguments '--php[PHP version]:version:_devstack_php' '--empty' '--title' '--json' ;;
@@ -35,6 +37,8 @@ _devstack() {
 		app) local -a a; a=( build install open uninstall status ); _describe 'action' a ;;
 		bootstrap) _arguments '--app' ;;
 		update) _arguments '--check' '--app' '--json' ;;
+		doctor) _arguments '--fix' '--json' ;;
+		uninstall) _arguments '--yes' '--purge' ;;
 		upgrade) _arguments '--check' '--auto' '--all' '--nightly' '--set-auto:mode:(off patch all)' '--json' ;;
 	esac
 }

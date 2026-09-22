@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# site-cache <name> redis|memcached|off|status [--json]
+# Persistent object cache for one WordPress site. redis: the Redis Object Cache plugin + its drop-in, keyed with a
+# per-site prefix so sites sharing 127.0.0.1:6379 never collide. memcached: Memcached Redux + its drop-in, salted per
+# site. off: drop-in removed, plugin deactivated (kept installed), cache flushed.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+NAME="" ; OP="status" ; JSON=0
+for arg in "$@"; do
+	case "$arg" in
+		redis|memcached|off|status) OP="$arg" ;; --json) JSON=1 ;;
+		--*) die "unknown flag $arg" ;;
+		*) NAME="$arg" ;;
+	esac
+done
+[ -n "$NAME" ] || die "usage: site-cache <name> redis|memcached|off|status [--json]"
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+[ -n "$SITE_PATH" ] && [ -f "$SITE_PATH/wp-config.php" ] || die "$NAME is not a linked WordPress site"
+PHPV="$(site_php "$SITE_PATH")"; DROPIN="$SITE_PATH/wp-content/object-cache.php"
+wp() { wp_site "$PHPV" "$SITE_PATH" "$@"; }
+# `wp redis …` lives in the plugin, which wp_site skips on purpose; this variant loads plugins for those calls.
+wpp() { "$(php_bin "$PHPV")" -d display_errors=stderr "$BREW_PREFIX/bin/wp" --path="$SITE_PATH" --skip-themes "$@" 2> >(grep -vE '^(Deprecated|Warning|Notice)' >&2); }
+
+# detect : redis | memcached | other | none, from the drop-in's header.
+detect() {
+	[ -f "$DROPIN" ] || { echo none; return; }
+	if head -20 "$DROPIN" | grep -qi redis; then echo redis; elif head -20 "$DROPIN" | grep -qi memcache; then echo memcached; else echo other; fi
+}
+before="$(detect)"
+
+case "$OP" in
+	status) ;;
+	off)
+		[ "redis" = "$before" ] && wpp redis disable --quiet 2> /dev/null || true
+		rm -f "$DROPIN"
+		wp plugin deactivate redis-cache memcached-redux --quiet 2> /dev/null || true
+		for c in WP_REDIS_HOST WP_REDIS_PORT WP_REDIS_PREFIX WP_CACHE_KEY_SALT; do wp config has "$c" 2> /dev/null && wp config delete "$c" --quiet; done
+		log "$NAME: object cache off" ;;
+	redis)
+		[ "redis" = "$before" ] || { [ "none" = "$before" ] || rm -f "$DROPIN"; }
+		wp plugin is-installed redis-cache 2> /dev/null || wp plugin install redis-cache --quiet
+		wp plugin activate redis-cache --quiet 2> /dev/null || true
+		wp config set WP_REDIS_HOST 127.0.0.1 --quiet
+		wp config set WP_REDIS_PORT 6379 --raw --quiet
+		wp config set WP_REDIS_PREFIX "$NAME" --quiet          # one Redis, many sites: keep their keys apart
+		wpp redis enable --quiet 2> /dev/null || wpp redis enable --force --quiet
+		log "$NAME: Redis object cache on (prefix $NAME)" ;;
+	memcached)
+		[ "memcached" = "$before" ] || { [ "none" = "$before" ] || { [ "redis" = "$before" ] && wpp redis disable --quiet 2> /dev/null; rm -f "$DROPIN"; }; }
+		wp plugin is-installed memcached-redux 2> /dev/null || wp plugin install memcached-redux --quiet
+		wp plugin activate memcached-redux --quiet 2> /dev/null || true
+		wp config set WP_CACHE_KEY_SALT "$NAME" --quiet
+		src="$(find "$SITE_PATH/wp-content/plugins/memcached-redux" -maxdepth 1 -name 'object-cache.php' | head -1)"
+		[ -n "$src" ] || die "memcached-redux ships no object-cache.php"
+		cp "$src" "$DROPIN"
+		log "$NAME: Memcached object cache on (salt $NAME)" ;;
+esac
+[ "status" = "$OP" ] || wp cache flush --quiet 2> /dev/null || true
+after="$(detect)"
+# Health: does WordPress see the cache working?
+working=null
+if [ "none" != "$after" ]; then
+	r="$(wp eval 'echo ( wp_using_ext_object_cache() && wp_cache_set( "devstack_probe", "1" ) && "1" === wp_cache_get( "devstack_probe" ) ) ? "yes" : "no";' 2> /dev/null | tail -1 || true)"
+	[ "yes" = "$r" ] && working=true || working=false
+fi
+if [ "1" = "$JSON" ]; then jq -n --arg n "$NAME" --arg b "$before" --arg a "$after" --argjson w "$working" '{name:$n,before:$b,object_cache:(if $a == "none" then null else $a end),working:$w,ok:true}'
+else echo "$NAME: object cache $after$([ true = "$working" ] && echo ' (working)' || { [ false = "$working" ] && echo ' (NOT working: is the service running?)'; })"; fi
