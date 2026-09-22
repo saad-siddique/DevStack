@@ -57,8 +57,15 @@ log "https: $step_secure"
 
 # Non-WordPress sites stop here.
 if [ "-" = "$SITE_DB" ] || [ ! -f "$SITE_PATH/wp-config.php" ]; then
-	log "not a WordPress site; done"
-	[ "1" = "$JSON" ] && jq -n --arg host "$SITE_HOST" --arg url "$SITE_URL" '{host:$host,url:$url,type:"non-wp",ok:true}'
+	code4="000"; code6="000"
+	if [ "1" != "$DRY" ]; then
+		code4="$(/usr/bin/curl -4 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
+		code6="$(/usr/bin/curl -6 -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
+	fi
+	log "not a WordPress site; linked + secured (ipv4=$code4 ipv6=$code6)"
+	[ "1" = "$JSON" ] && jq -n --arg host "$SITE_HOST" --arg url "$SITE_URL" --arg link "$step_link" --arg secure "$step_secure" \
+		--argjson ipv4 "$code4" --argjson ipv6 "$code6" \
+		'{host:$host,url:$url,type:"non-wp",steps:{link:$link,secure:$secure},smoke:{ipv4:$ipv4,ipv6:$ipv6},ok:true}'
 	exit 0
 fi
 
