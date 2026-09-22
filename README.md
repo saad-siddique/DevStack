@@ -7,6 +7,31 @@ MySQL 8.4 · Mailpit · Redis · Memcached · WP-CLI · phpMyAdmin · one global
 
 ![DevStack menu-bar panel](docs/img/panel.png)
 
+## Features
+
+- **Sites in one command or one click.** New WordPress site with its own database, user, HTTPS and `admin`/`admin1`
+  in under a minute; import a LocalWP export, any folder plus dump, or a DevStack backup; duplicate a site under a new
+  name; switch a site's PHP version; favourites pinned to the top; every site's folder and database size, sortable.
+- **One-click login.** A one-time link drops you into wp-admin signed in, no password to remember.
+- **Backups that restore verbatim.** Instant APFS clones or compressed archives, database-only save points with
+  labels, roll back a database in seconds, archive a site to free disk and restore it later exactly as it was,
+  prune old backups.
+- **Share a site publicly.** A stable hostname on your Cloudflare tunnel per site, created and routed for you, with
+  WordPress answering under the public URL so webhooks and remote testers work. Unshare one site at a time.
+- **Per-site object cache.** Redis or Memcached with a per-site key prefix, on or off from the menu.
+- **Every PHP from 7.4 to 8.6**, php-fpm only for versions in use, Xdebug per version in trigger mode.
+- **Guards.** php-fpm pool limits and slow log, MySQL tuned for local work (no binary log), a watchdog that revives
+  nginx, runaway-process detection, crash and resource reports classified, per-site fatal counts, `devstack doctor`
+  with a fix for every finding and `--fix` to apply the safe ones.
+- **Updates on your terms.** The app checks the repo and Homebrew for you and shows what is waiting; nothing is
+  applied without a click unless you opt into nightly patch upgrades.
+- **Notifications** for service changes, finished tasks, crashes, watchdog restarts and available updates. Mute in
+  one click.
+- **Two identical views.** The menu-bar app (⌃⌥D) and `https://dashboard.test` read the same `devstack status`,
+  so they always agree. Light mode is Glass, dark mode is Console, following the system.
+- **Logs** for nginx, PHP, MySQL, Redis, Mailpit and each site's `debug.log`, rotated daily, never older than 48 h.
+- **Uninstall** with one command; sites, databases and backups stay.
+
 ## What you get
 
 | | |
