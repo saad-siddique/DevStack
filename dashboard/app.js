@@ -168,11 +168,16 @@
 		} );
 	}
 
+	var sortBySize = 'size' === localStorage.getItem( 'sites.sort' );
+	function fmtBytes( b ) { return fmtSize( b || 0 ); }
+
 	function renderSites( s ) {
 		var tbody = $( 'sites' ).querySelector( 'tbody' );
 		tbody.textContent = '';
 		var q = filterText.trim().toLowerCase();
 		var rows = s.sites.filter( function ( site ) { return ! q || -1 !== site.name.indexOf( q ); } );
+		if ( sortBySize ) { rows = rows.slice().sort( function ( a, b ) { return ( ( b.files_bytes || 0 ) + ( b.db_bytes || 0 ) ) - ( ( a.files_bytes || 0 ) + ( a.db_bytes || 0 ) ); } ); }
+		$( 'sort-size' ).classList.toggle( 'on', sortBySize );
 		rows.forEach( function ( site ) {
 			var host = site.name + '.test';
 			var php = 'default' === site.php ? '8.4' : site.php;
@@ -185,15 +190,23 @@
 			if ( site.fatals_recent ) {
 				nameCell.appendChild( el( 'span', { 'class': 'badge fatals', title: site.fatals_recent + ' PHP fatal error(s) in debug.log today or yesterday — Logs tab, wp ' + site.name, text: site.fatals_recent + ( 1 === site.fatals_recent ? ' fatal' : ' fatals' ) } ) );
 			}
+			var disk = el( 'td', { 'class': 'disk' } );
+			if ( null !== site.files_bytes || null !== site.db_bytes ) {
+				disk.appendChild( el( 'span', { title: 'folder' + ( site.db ? ' + database ' + site.db : '' ), text: ( null !== site.files_bytes ? fmtBytes( site.files_bytes ) : '?' ) + ( site.db_bytes ? ' + ' + fmtBytes( site.db_bytes ) + ' db' : '' ) } ) );
+			} else {
+				disk.appendChild( el( 'span', { 'class': 'muted', text: '—' } ) );
+			}
 			tbody.appendChild( el( 'tr', {}, [
 				nameCell,
 				el( 'td', {}, [ el( 'span', { 'class': 'badge' + ( '7.4' === php ? ' php74' : '' ), text: 'PHP ' + php } ) ] ),
 				el( 'td', {}, [ el( 'span', { 'class': 'badge ' + ( site.secured ? 'https' : 'http' ), text: site.secured ? 'https' : 'http only' } ) ] ),
 				open,
+				disk,
 				el( 'td', { 'class': 'folder', title: site.path, text: ( site.path || '' ).replace( s.sites_dir, '~/Sites' ) } )
 			] ) );
 		} );
 		$( 'sites-count' ).textContent = rows.length === s.sites.length ? String( s.sites.length ) : rows.length + ' of ' + s.sites.length;
+		renderSizes( s );
 		var empty = $( 'sites-empty' );
 		empty.hidden = rows.length > 0;
 		empty.textContent = q ? 'No sites match “' + filterText.trim() + '”.' : 'No sites are linked yet. Run bin/site-new <name> to create one.';
@@ -203,6 +216,25 @@
 		var bar = document.querySelector( '.error-bar' ) || document.querySelector( 'main' ).insertBefore( el( 'div', { 'class': 'error-bar', role: 'alert' } ), document.querySelector( 'main' ).firstChild );
 		bar.textContent = msg;
 		setTimeout( function () { if ( bar.parentNode ) { bar.parentNode.removeChild( bar ); } }, 8000 );
+	}
+
+	// Totals under the sites table + the button that starts a fresh du in the background.
+	function renderSizes( s ) {
+		var box = $( 'sizes' );
+		box.textContent = '';
+		var z = s.sizes || {};
+		var parts = [];
+		if ( z.files_total ) { parts.push( fmtBytes( z.files_total ) + ' in ~/Sites' ); }
+		if ( z.db_total ) { parts.push( fmtBytes( z.db_total ) + ' in MySQL' ); }
+		if ( z.computed_at ) { parts.push( 'folders measured ' + new Date( z.computed_at ).toLocaleString( [], { weekday: 'short', hour: '2-digit', minute: '2-digit' } ) ); }
+		box.appendChild( el( 'span', { text: parts.length ? parts.join( '  ·  ' ) : 'Folder sizes not measured yet.' } ) );
+		box.appendChild( document.createTextNode( ' ' ) );
+		var b = el( 'button', { 'class': 'act quiet', type: 'button', text: 'Measure folders' } );
+		b.addEventListener( 'click', function () {
+			b.disabled = true; b.textContent = 'Measuring in the background…';
+			post( 'sizes-refresh', {} ).then( function () { setTimeout( refresh, 90000 ); } );
+		} );
+		box.appendChild( b );
 	}
 
 	function render( s ) {
@@ -247,13 +279,19 @@
 			if ( 'logs' === currentTab ) { logData = null; loadLog(); }
 		} );
 	}
+	$( 'sort-size' ).addEventListener( 'click', function () {
+		sortBySize = ! sortBySize;
+		localStorage.setItem( 'sites.sort', sortBySize ? 'size' : 'name' );
+		if ( last ) { renderSites( last ); }
+	} );
 	$( 'refresh' ).addEventListener( 'click', function () { refresh(); } );
 
 
 	function fmtSize( b ) {
 		if ( b < 1024 ) { return b + ' B'; }
 		if ( b < 1048576 ) { return Math.round( b / 1024 ) + ' KB'; }
-		return ( b / 1048576 ).toFixed( 1 ) + ' MB';
+		if ( b < 1073741824 ) { return ( b / 1048576 ).toFixed( b < 10485760 ? 1 : 0 ) + ' MB'; }
+		return ( b / 1073741824 ).toFixed( 1 ) + ' GB';
 	}
 
 	function renderAlert( s ) {

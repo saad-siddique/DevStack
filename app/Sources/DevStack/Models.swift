@@ -11,6 +11,14 @@ struct StackStatus: Decodable {
 	var mail: MailInfo
 	var upgrades: Upgrades?
 	var watchdog: Watchdog?
+	var sizes: Sizes?
+
+	struct Sizes: Decodable {
+		let computedAt: String?
+		let filesTotal: Int?
+		let dbTotal: Int?
+		var computedDate: Date? { computedAt.flatMap { ISO8601DateFormatter().date(from: $0) } }
+	}
 
 	/// Everything that is not a php-fpm pool; those live under PHP.
 	var coreServices: [Service] { services.filter { !$0.name.hasPrefix("php") } }
@@ -84,6 +92,17 @@ struct Site: Decodable, Identifiable, Equatable, Hashable {
 	let protected: Bool?
 	let fatalsRecent: Int?      // PHP fatals in wp-content/debug.log today or yesterday
 	let debugLog: String?
+	let db: String?
+	let dbBytes: Int?           // live, from information_schema
+	let filesBytes: Int?        // from the nightly du (devstack sizes --refresh)
+	var totalBytes: Int { (dbBytes ?? 0) + (filesBytes ?? 0) }
+	var sizeText: String? {
+		guard filesBytes != nil || dbBytes != nil else { return nil }
+		var parts: [String] = []
+		if let f = filesBytes { parts.append(ByteCountFormatter.string(fromByteCount: Int64(f), countStyle: .file)) }
+		if let d = dbBytes, d > 0 { parts.append("\(ByteCountFormatter.string(fromByteCount: Int64(d), countStyle: .file)) db") }
+		return parts.joined(separator: " + ")
+	}
 	var id: String { name }
 	var isProtected: Bool { protected ?? false }
 	var url: String { "\(secured ? "https" : "http")://\(name).test" }
@@ -188,8 +207,10 @@ struct BackupEntry: Decodable, Identifiable, Equatable {
 	let tables: Int?
 	let dbDump: String?
 	let files: Bool?
+	let filesArchive: String?
 	let sizeBytes: Int?
 	var id: String { path }
+	var isCompressed: Bool { filesArchive != nil }
 	var createdDate: Date? { created.flatMap { ISO8601DateFormatter().date(from: $0) } }
 	var sizeText: String { ByteCountFormatter.string(fromByteCount: Int64(sizeBytes ?? 0), countStyle: .file) }
 	var restorable: Bool { files ?? false }

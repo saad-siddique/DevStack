@@ -138,6 +138,13 @@ if ( '' !== $api ) {
 		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'stack-upgrade failed' ) );
 	}
 
+	if ( 'sizes-refresh' === $api && $is_write ) {
+		// du over every site takes minutes: start it detached and let the next status reload pick the numbers up.
+		$cmd = sprintf( 'nohup %s --refresh --json > /dev/null 2>&1 &', escapeshellarg( $repo_bin . '/site-sizes' ) );
+		exec( 'PATH=/opt/homebrew/bin:/usr/bin:/bin HOME=' . escapeshellarg( $home ) . ' ' . $cmd );
+		devstack_json( 202, array( 'started' => true ) );
+	}
+
 	if ( 'upgrade-auto' === $api && $is_write ) {
 		$value = (string) ( $_POST['value'] ?? '' );
 		if ( ! in_array( $value, array( 'off', 'patch', 'all' ), true ) ) {
@@ -212,10 +219,11 @@ header( 'Cache-Control: no-store' );
 				<label class="filter"><span class="visually-hidden">Filter sites</span><input type="search" id="filter" placeholder="Filter sites" autocomplete="off"></label>
 			</div>
 			<table class="sites" id="sites">
-				<thead><tr><th scope="col">Site</th><th scope="col">PHP</th><th scope="col">HTTPS</th><th scope="col">Open</th><th scope="col">Folder</th></tr></thead>
+				<thead><tr><th scope="col">Site</th><th scope="col">PHP</th><th scope="col">HTTPS</th><th scope="col">Open</th><th scope="col"><button type="button" class="th-sort" id="sort-size" title="Sort by disk footprint">Disk</button></th><th scope="col">Folder</th></tr></thead>
 				<tbody></tbody>
 			</table>
 			<p class="empty" id="sites-empty" hidden></p>
+			<p class="sizes" id="sizes"></p>
 		</section>
 
 		<section class="tab" id="tab-php" role="tabpanel" data-tab="php" hidden>

@@ -34,9 +34,9 @@ enum Snapshot {
 		await capture(PanelView().environmentObject(state), "panel-upgrades", dir)
 		state.freeze(with: fixture)
 		state.setBackups([
-			BackupEntry(name: "acme-shop", created: "2026-09-22T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260922-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, sizeBytes: 277_618_688),
-			BackupEntry(name: "acme-shop", created: "2026-09-21T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260921-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, sizeBytes: 271_000_000),
-			BackupEntry(name: "old-landing", created: "2026-09-18T17:40:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/old-landing/20260918-174000", php: "php@7.4", db: "wp_old_landing", tables: 12, dbDump: "db.sql.gz", files: true, sizeBytes: 96_000_000),
+			BackupEntry(name: "acme-shop", created: "2026-09-22T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260922-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, filesArchive: nil, sizeBytes: 277_618_688),
+			BackupEntry(name: "acme-shop", created: "2026-09-21T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260921-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, filesArchive: nil, sizeBytes: 271_000_000),
+			BackupEntry(name: "old-landing", created: "2026-09-18T17:40:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/old-landing/20260918-174000", php: "php@7.4", db: "wp_old_landing", tables: 12, dbDump: "db.sql.gz", files: true, filesArchive: "files.tar.zst", sizeBytes: 31_000_000),
 		])
 		state.modal = .backups(nil)
 		await capture(ModalView().environmentObject(state), "backups", dir)
@@ -64,8 +64,10 @@ enum Snapshot {
 	/// Made-up sites so screenshots never show a real machine's inventory.
 	private static var fixture: StackStatus {
 		let home = NSHomeDirectory()
-		func site(_ n: String, _ php: String, wp: Bool = true, protected: Bool = false) -> Site {
-			Site(name: n, php: php, secured: true, wp: wp, path: "\(home)/Sites/\(n)", protected: protected, fatalsRecent: n == "client-blog" ? 2 : 0, debugLog: wp ? "\(home)/Sites/\(n)/wp-content/debug.log" : nil)
+		func site(_ n: String, _ php: String, wp: Bool = true, protected: Bool = false, files: Int = 900_000_000, db: Int = 60_000_000) -> Site {
+			Site(name: n, php: php, secured: true, wp: wp, path: "\(home)/Sites/\(n)", protected: protected, fatalsRecent: n == "client-blog" ? 2 : 0,
+			     debugLog: wp ? "\(home)/Sites/\(n)/wp-content/debug.log" : nil, db: wp ? "wp_\(n.replacingOccurrences(of: "-", with: "_"))" : nil,
+			     dbBytes: wp ? db : nil, filesBytes: files)
 		}
 		func svc(_ n: String, _ u: String) -> Service { Service(name: n, status: "started", user: u) }
 		func php(_ v: String, _ full: String, fpm: Bool, def: Bool = false, sites: Int = 0) -> PhpVersion {
@@ -78,12 +80,15 @@ enum Snapshot {
 			php: [php("7.4", "7.4.33", fpm: true, sites: 2), php("8.0", "8.0.30", fpm: false), php("8.1", "8.1.33", fpm: false),
 			      php("8.2", "8.2.29", fpm: true, sites: 1), php("8.3", "8.3.26", fpm: false), php("8.4", "8.4.13", fpm: true, def: true, sites: 4),
 			      php("8.5", "8.5.2", fpm: false), php("8.6", "8.6.0", fpm: false)],
-			sites: [site("acme-shop", "default"), site("client-blog", "8.2"), site("company-docs", "7.4"), site("landing-page", "default", wp: false),
-			        site("legacy-intranet", "7.4"), site("plugin-dev", "default", protected: true), site("staging-mirror", "default")],
+			sites: [site("acme-shop", "default", files: 2_400_000_000, db: 410_000_000), site("client-blog", "8.2", files: 650_000_000, db: 38_000_000),
+			        site("company-docs", "7.4", files: 1_100_000_000, db: 120_000_000), site("landing-page", "default", wp: false, files: 45_000_000),
+			        site("legacy-intranet", "7.4", files: 7_800_000_000, db: 1_600_000_000), site("plugin-dev", "default", protected: true, files: 13_300_000_000, db: 1_570_000_000),
+			        site("staging-mirror", "default", files: 6_200_000_000, db: 1_800_000_000)],
 			ports: ["80": "nginx", "443": "nginx", "3306": "mysql", "1025": "mailpit", "8025": "mailpit", "6379": "redis", "11211": "memcached"],
 			mysql: MySQLInfo(version: "8.4.6", qps: 0.4),
 			mail: MailInfo(backend: "mailpit", total: 3),
-			upgrades: nil, watchdog: nil)
+			upgrades: nil, watchdog: nil,
+			sizes: StackStatus.Sizes(computedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600 * 10)), filesTotal: 32_500_000_000, dbTotal: 5_538_000_000))
 	}
 
 	private static func capture<V: View>(_ view: V, _ name: String, _ dir: String) async {

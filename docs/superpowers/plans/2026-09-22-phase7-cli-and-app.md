@@ -98,3 +98,14 @@ brew/valet/mysql itself.
   ⌃⌥D hotkey (Carbon; clicks the status item, falls back to the panel in a window), Previous tasks menu.
 - Verified: archive cleantest → 404; restore → 200, wp_cleantest_db / wp_root_user unchanged, 43 tables;
   clone → clonetest 200 → removed; prune dry run.
+
+## Footprint and compressed archives (same afternoon)
+
+- Question answered with numbers: idle sites cost ~nothing at runtime (no per-site processes; whole stack idles at
+  ~100 MB; php-fpm pools are per version). Disk is the cost: 79 GB in ~/Sites, 8 GB in MySQL. So: no per-site
+  on/off switch; Archive is the parking mechanism, with `--compress` (tar --zstd, zstd added to the Brewfile) so
+  the bytes really leave; the APFS clone default keeps sharing blocks.
+- `bin/site-sizes [--refresh]` → $DATA_DIR/sizes.json (nightly, after stack-upgrade; du over 79 GB takes minutes);
+  stack-status sites[] gain db (name), db_bytes (live), files_bytes (cache) and a top-level sizes{} block; app Sites
+  tab: size in the subtitle, A–Z/Size sort, totals line + Measure; dashboard: Disk column (sortable header), totals
+  line + Measure folders (detached nohup); Archive dialog: Compress toggle + footprint.

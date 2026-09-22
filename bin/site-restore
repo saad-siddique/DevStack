@@ -20,7 +20,8 @@ done
 [ -n "$NAME" ] || die "usage: site-restore <name> [--from BACKUP_DIR] [--replace] [--json]"
 if [ -z "$FROM" ]; then FROM="$(ls -d "$BACKUP_ROOT/$NAME"/*/ 2> /dev/null | sort | tail -1)"; FROM="${FROM%/}"; fi
 [ -n "$FROM" ] && [ -f "$FROM/manifest.json" ] || die "no backup found for $NAME (devstack backups)"
-[ -d "$FROM/files" ] || die "$FROM has no files/ (made with --db-only); use devstack import for a database-only restore"
+ARCHIVE="$(jq -r '.files_archive // empty' "$FROM/manifest.json")"
+[ -d "$FROM/files" ] || [ -n "$ARCHIVE" ] && [ -f "$FROM/$ARCHIVE" ] || [ -d "$FROM/files" ] || die "$FROM has no files (made with --db-only); use devstack import for a database-only restore"
 PHPV="$(jq -r '.php // empty' "$FROM/manifest.json")"; PHPV="${PHPV:-$DEFAULT_PHP}"
 DUMP="$(jq -r '.db_dump // empty' "$FROM/manifest.json")"
 SITE_PATH="$SITES_DIR/$NAME"; URL="https://$NAME.$TLD"
@@ -37,8 +38,13 @@ if [ -e "$SITE_PATH" ] || [ -L "$VALET_HOME/Sites/$NAME" ]; then
 	replaced=true
 fi
 
-# Files: clone the backup back (instant on the same APFS volume).
-cp -Rc "$FROM/files" "$SITE_PATH" 2> /dev/null || cp -R "$FROM/files" "$SITE_PATH"
+# Files: unpack a compressed archive, or clone the backup back (instant on the same APFS volume).
+if [ -n "$ARCHIVE" ] && [ -f "$FROM/$ARCHIVE" ]; then
+	mkdir -p "$SITE_PATH"; log "files: extracting $ARCHIVE"
+	tar -xf "$FROM/$ARCHIVE" -C "$SITE_PATH" || die "extracting $ARCHIVE failed"
+else
+	cp -Rc "$FROM/files" "$SITE_PATH" 2> /dev/null || cp -R "$FROM/files" "$SITE_PATH"
+fi
 log "files: restored $(find "$SITE_PATH" -type f | wc -l | tr -d ' ') files to $SITE_PATH"
 
 db_name=""; n_tables=0

@@ -27,6 +27,10 @@ php_json="$(for d in "$BREW_PREFIX"/etc/php/*/; do
 done | jq -s 'sort_by(.version)')"
 
 today="$(date '+%d-%b-%Y')"; yday="$(date -v-1d '+%d-%b-%Y')"
+# Disk: database bytes live from information_schema (one query), folder bytes from bin/site-sizes' nightly cache.
+db_sizes="$(mysql_new -N -e "SELECT table_schema, COALESCE(SUM(data_length + index_length), 0) FROM information_schema.TABLES GROUP BY table_schema" 2> /dev/null \
+	| jq -R 'split("\t") | select(length == 2) | {(.[0]): (.[1] | tonumber)}' | jq -s 'add // {}' 2> /dev/null || echo '{}')"
+folder_sizes="$(jq -c '.' "$DATA_DIR/sizes.json" 2> /dev/null || echo '{"computed_at":null,"sites":{}}')"
 sites="$(for l in "$VALET_HOME"/Sites/*; do
 	[ -L "$l" ] || continue
 	n="$(basename "$l")"; php=default
@@ -41,8 +45,11 @@ sites="$(for l in "$VALET_HOME"/Sites/*; do
 	# PHP fatals WordPress logged today or yesterday (debug.log is rotated, so its tail is enough).
 	fatals=0; dlog="$target/wp-content/debug.log"
 	if [ -f "$dlog" ]; then fatals="$(tail -n 3000 "$dlog" | /usr/bin/grep -cE "^\[($today|$yday)[^]]*\] PHP (Fatal|Parse) error" || true)"; else dlog=""; fi
+	dbn=""; [ "true" = "$wp" ] && dbn="$(sed -nE "s/.*define\( *['\"]DB_NAME['\"], *['\"]([^'\"]+)['\"].*/\1/p" "$target/wp-config.php" 2> /dev/null | head -1 || true)"
 	jq -n --arg name "$n" --arg php "$php" --argjson secured "$secured" --argjson wp "$wp" --arg path "$target" --argjson prot "$prot" --argjson fatals "${fatals:-0}" --arg dlog "$dlog" \
-		'{name:$name,php:$php,secured:$secured,wp:$wp,path:$path,protected:$prot,fatals_recent:$fatals,debug_log:(if $dlog == "" then null else $dlog end)}'
+		--arg dbn "$dbn" --argjson dbs "$db_sizes" --argjson fs "$folder_sizes" \
+		'{name:$name,php:$php,secured:$secured,wp:$wp,path:$path,protected:$prot,fatals_recent:$fatals,debug_log:(if $dlog == "" then null else $dlog end),
+		  db:(if $dbn == "" then null else $dbn end), db_bytes:(if $dbn == "" then null else ($dbs[$dbn] // null) end), files_bytes:($fs.sites[$name] // null)}'
 done | jq -s 'sort_by(.name)')"
 
 # Port owner: when several processes listen (Docker's *:6379 beside Homebrew's 127.0.0.1:6379), prefer the
@@ -78,5 +85,6 @@ upgrades="$(jq -c '.' "$DATA_DIR/upgrades.json" 2> /dev/null || echo null)"
 # What the five-minute watchdog last did (bin/watchdog).
 watchdog="$(jq -c '.' "$DATA_DIR/watchdog.json" 2> /dev/null || echo null)"
 
-jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" --argjson upgrades "$upgrades" --argjson watchdog "$watchdog" \
-	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail, upgrades:$upgrades, watchdog:$watchdog}'
+jq -n --argjson services "$services" --argjson php "$php_json" --argjson sites "$sites" --argjson ports "$ports" --argjson mysql "$mysql_json" --argjson mail "$mail_json" --argjson upgrades "$upgrades" --argjson watchdog "$watchdog" --argjson fs "$folder_sizes" \
+	'{generated_at: (now | todate), services:$services, php:$php, sites:$sites, ports:$ports, mysql:$mysql, mail:$mail, upgrades:$upgrades, watchdog:$watchdog,
+	  sizes:{computed_at:$fs.computed_at, files_total:([$sites[].files_bytes // 0] | add), db_total:([$sites[].db_bytes // 0] | add)}}'

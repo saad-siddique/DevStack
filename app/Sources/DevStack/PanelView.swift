@@ -147,18 +147,36 @@ struct PanelView: View {
 struct SitesView: View {
 	@EnvironmentObject private var state: AppState
 	@StateObject private var form = FormModel()
+	@AppStorage("sites.sort") private var sortBySize = false
 	let present: (AppState.Modal) -> Void
 	private var filter: String { form.filter }
 
 	private var sites: [Site] {
-		(state.status?.userSites ?? []).filter { filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) }
+		let list = (state.status?.userSites ?? []).filter { filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) }
+		return sortBySize ? list.sorted { $0.totalBytes > $1.totalBytes } : list
+	}
+
+	private var sizesLine: String? {
+		guard let s = state.status?.sizes, (s.filesTotal ?? 0) > 0 || (s.dbTotal ?? 0) > 0 else { return nil }
+		var parts: [String] = []
+		if let f = s.filesTotal, f > 0 { parts.append("\(ByteCountFormatter.string(fromByteCount: Int64(f), countStyle: .file)) in ~/Sites") }
+		if let d = s.dbTotal, d > 0 { parts.append("\(ByteCountFormatter.string(fromByteCount: Int64(d), countStyle: .file)) in MySQL") }
+		if let at = s.computedDate { parts.append("folders measured \(at.formatted(.relative(presentation: .named)))") }
+		return parts.joined(separator: "  ·  ")
 	}
 
 	var body: some View {
 		VStack(spacing: 0) {
-			TextField("Filter sites", text: $form.filter)
-				.textFieldStyle(.roundedBorder).controlSize(.small)
-				.padding(.horizontal, 14).padding(.bottom, 6)
+			HStack(spacing: 6) {
+				TextField("Filter sites", text: $form.filter).textFieldStyle(.roundedBorder).controlSize(.small)
+				Picker("Sort", selection: $sortBySize) {
+					Text("A–Z").tag(false)
+					Text("Size").tag(true)
+				}
+				.pickerStyle(.segmented).labelsHidden().controlSize(.small).frame(width: 90)
+				.help("Sort by name or by disk footprint (folder + database)")
+			}
+			.padding(.horizontal, 14).padding(.bottom, 6)
 			if state.status == nil {
 				Spacer(); ProgressView().controlSize(.small); Spacer()
 			} else if sites.isEmpty {
@@ -173,6 +191,15 @@ struct SitesView: View {
 					}
 					.padding(.bottom, 4)
 				}
+				Divider().padding(.horizontal, 14)
+				HStack(spacing: 6) {
+					Text(sizesLine ?? "Folder sizes not measured yet.").font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+					Spacer()
+					Button(state.task.running ? "Measuring…" : "Measure") { present(.task); state.refreshSizes() }
+						.buttonStyle(.borderless).font(.caption2).disabled(state.task.running)
+						.help("Walk every site folder with du (minutes); the 03:30 run does this nightly")
+				}
+				.padding(.horizontal, 14).padding(.vertical, 5)
 			}
 		}
 	}
@@ -192,6 +219,7 @@ struct SiteRow: View {
 		if let v = fpmStopped { parts[0] += " (php-fpm \(v) stopped)" }
 		parts.append(site.wp ? "WordPress" : "PHP / static")
 		if site.isProtected { parts.append("protected") }
+		if let size = site.sizeText { parts.append(size) }
 		if fatals > 0 { parts.append("\(fatals) fatal\(fatals == 1 ? "" : "s") in debug.log") }
 		return parts.joined(separator: "  ·  ")
 	}

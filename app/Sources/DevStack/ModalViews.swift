@@ -56,6 +56,7 @@ final class FormModel: ObservableObject {
 	@Published var adminPassword = "admin1"
 	@Published var adminEmail = "admin@example.test"
 	@Published var keep = 5
+	@Published var compress = false
 }
 
 struct NewSiteView: View {
@@ -311,7 +312,7 @@ struct BackupsView: View {
 					Text(b.name).fontWeight(.medium)
 					if !exists { Text("site absent").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1).background(Color.orange.opacity(0.15), in: Capsule()) }
 				}
-				Text([b.createdDate?.formatted(date: .abbreviated, time: .shortened) ?? "?", b.sizeText, b.php.map { "PHP \($0.replacingOccurrences(of: "php@", with: ""))" }, b.tables.map { "\($0) tables" }, b.restorable ? "files + database" : "database only"]
+				Text([b.createdDate?.formatted(date: .abbreviated, time: .shortened) ?? "?", b.sizeText, b.php.map { "PHP \($0.replacingOccurrences(of: "php@", with: ""))" }, b.tables.map { "\($0) tables" }, b.isCompressed ? "files (compressed) + database" : (b.restorable ? "files + database" : "database only")]
 					.compactMap { $0 }.joined(separator: "  ·  ")).font(.caption).foregroundStyle(.secondary)
 			}
 			Spacer()
@@ -339,23 +340,31 @@ struct RemoveSiteView: View {
 			HStack(alignment: .top, spacing: 12) {
 				Image(systemName: "trash.circle.fill").font(.system(size: 34)).foregroundStyle(.red)
 				VStack(alignment: .leading, spacing: 6) {
-					Text("Remove “\(site.name)”?").font(.title3.weight(.semibold))
+					Text(backupFirst ? "Archive “\(site.name)”?" : "Remove “\(site.name)”?").font(.title3.weight(.semibold))
 					Text("This unlinks \(site.url), removes its certificate, drops its database and database user, and deletes \(abbreviate(site.path)).")
 						.foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 				}
 			}
-			Toggle("Back up first (files clone + database dump in ~/Backups/DevStack)", isOn: $form.backupFirst)
-				.padding(.leading, 46)
+			VStack(alignment: .leading, spacing: 6) {
+				Toggle("Back up first (verbatim, restorable from Backups…)", isOn: $form.backupFirst)
+				Toggle("Compress the files so the disk space is really freed (minutes for big sites)", isOn: $form.compress)
+					.disabled(!backupFirst)
+				if let size = site.sizeText { Text("This site uses \(size).").font(.caption).foregroundStyle(.secondary) }
+				if backupFirst && !form.compress {
+					Text("Without compression the backup is an instant clone that keeps sharing the site's blocks, so removing the site frees only the database.").font(.caption).foregroundStyle(.secondary)
+				}
+			}
+			.padding(.leading, 46)
 			HStack {
 				Spacer()
 				Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-				Button(backupFirst ? "Back up and remove" : "Remove") { state.remove(site, backupFirst: backupFirst) }
+				Button(backupFirst ? (form.compress ? "Compress, back up and remove" : "Back up and remove") : "Remove") { state.remove(site, backupFirst: backupFirst, compress: form.compress) }
 					.keyboardShortcut(.defaultAction).tint(.red)
 			}
 		}
 		.padding(20)
-		.frame(width: 500)
-		.navigationTitle("Remove site")
+		.frame(width: 520)
+		.navigationTitle(backupFirst ? "Archive site" : "Remove site")
 	}
 }
 

@@ -359,11 +359,13 @@ final class AppState: ObservableObject {
 
 	func backup(_ site: Site) { runJob(title: "Back up \(site.name)", ["backup", site.name, "--json"]) }
 
-	func remove(_ site: Site, backupFirst: Bool) {
+	func remove(_ site: Site, backupFirst: Bool, compress: Bool = false) {
 		var args = ["remove", site.name, "--yes"]
-		if backupFirst { args.append("--backup") }
-		runJob(title: "Remove \(site.name)", args)
+		if backupFirst { args.append("--backup"); if compress { args.append("--compress") } }
+		runJob(title: backupFirst ? "Archive \(site.name)" : "Remove \(site.name)", args)
 	}
+
+	func refreshSizes() { runJob(title: "Measure site folders", ["sizes", "--refresh", "--json"]) }
 
 	private func runJob(title: String, _ args: [String]) {
 		guard !task.running else { errorMessage = "Another task is still running."; return }

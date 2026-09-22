@@ -99,7 +99,8 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Open a site | Compass icon on its row, or its URL `https://<name>.test`. |
 | Log in to wp-admin | Key icon on its row. A one-time link signs you in as the first administrator; nothing to type. |
 | Back up a site | ⋯ → Back up now. Files are cloned and the database dumped into `~/Backups/DevStack/<site>/<stamp>/`. |
-| Archive a site | ⋯ → Archive (back up, then remove)…. A verbatim backup is taken and kept, then the site is removed. Protected sites cannot be archived. |
+| Archive a site | ⋯ → Archive (back up, then remove)…. A verbatim backup is taken and kept, then the site is removed. Tick *Compress the files* when you want the disk space back (see Backups below). Protected sites cannot be archived. |
+| See what a site costs | Each row shows folder + database size; the Size sort puts the biggest first; the line under the list has the totals and a *Measure* button (folders are walked nightly, databases are live). |
 | Restore a site | ⋯ → Restore from backup…, or ⋯ menu → Backups…. Restore recreates it exactly: same address, PHP version, database name and logins. If the site still exists you are asked to replace it (a safety backup is taken first). |
 | Duplicate a site | ⋯ → Duplicate…. Backs up, then imports the backup under the new name with its own database and rewritten URLs. |
 | Manage backups | ⋯ menu → Backups…: every backup with date, size and PHP version; Restore, Show in Finder, Delete; *Keep newest 5 per site* prunes the rest. |
@@ -155,7 +156,8 @@ devstack import client ~/Downloads/client.zip    # LocalWP export, any zip/folde
 devstack backup myplugin                         # ~/Backups/DevStack/myplugin/<stamp>/ — see Backups
 devstack backups                                 # list them, newest first
 devstack backups --prune --keep 5                # delete older backups (the newest of every site always stays)
-devstack archive myplugin                        # verbatim backup, then remove the site
+devstack archive myplugin [--compress]           # verbatim backup, then remove the site; --compress really frees the disk
+devstack sizes [--refresh]                       # disk per site folder (the nightly run refreshes; --refresh walks now)
 devstack restore myplugin [--replace]            # bring it back exactly as it was (same URL, PHP, database, logins)
 devstack clone myplugin myplugin-copy            # a copy under a new name: own database, URLs rewritten
 devstack remove myplugin --yes --backup          # same as archive, spelled out
@@ -241,7 +243,14 @@ cannot abort it) and `manifest.json` (name, PHP version, database, table count).
 three seconds.
 
 - **Archive** (`devstack archive <site>`, or ⋯ → Archive in the app) takes that backup, then removes the site. It
-  refuses to remove anything when the backup fails.
+  refuses to remove anything when the backup fails. The default backup is an APFS clone: instant, but it shares
+  blocks with the site, so once the site is deleted the clone holds the bytes and only the database space is freed.
+  `--compress` (the checkbox in the dialog) packs the files into `files.tar.zst` instead: minutes for a multi-gigabyte
+  folder, and the disk space really comes back. Restore and Import unpack it transparently.
+- **Footprint**: `devstack status` carries each site's database size (live, from `information_schema`) and folder
+  size (from `devstack sizes --refresh`, which the 03:30 run performs; a `du` over 80 GB takes minutes, so it is
+  never done on a status read). The app's Sites tab and the dashboard's Disk column show the same numbers, sort by
+  them, and can trigger a fresh measurement.
 - **Restore** (`devstack restore <site>`, newest backup by default, `--from DIR` for another) puts the site back
   verbatim: files cloned back, wp-config untouched, so the same database name, user and password, `.valetrc` PHP
   version, same URL, no rewrite. `--replace` first takes a safety backup of the current site and removes it.
@@ -297,7 +306,8 @@ What keeps a bad plugin, a stuck request or a forgotten service from ruining the
 Two different things update, and both are prompts by default.
 
 **The stack itself (Homebrew formulae: PHP, MySQL, nginx, Redis, Mailpit, extensions).** A LaunchAgent,
-`com.devstack.upgrade`, runs `devstack upgrade --nightly` at 03:30 (or on the next wake). It runs `brew update`,
+`com.devstack.upgrade`, runs `devstack upgrade --nightly` at 03:30 (or on the next wake), followed by
+`devstack sizes --refresh`. It runs `brew update`,
 lists the outdated stack formulae and sorts them by version distance: **patch** releases (`x.y.Z`, the security and
 bug-fix line) and **minor/major** releases. By default it changes nothing and only reports. The report shows up in
 the app's panel and on the dashboard's Overview:

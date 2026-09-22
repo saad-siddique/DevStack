@@ -29,11 +29,18 @@ SITE_PATH="$SITES_DIR/$NAME"; URL="https://$NAME.$TLD"
 mkdir -p "$LOG_DIR"; exec 2> >(tee -a "$LOG_DIR/site-import-$NAME.log" >&2)
 log "=== site-import $NAME from $SRC ($PHPV)"
 
-# 1. Unpack (zip) or use the folder as-is.
+# 1. Unpack (zip, or a compressed devstack backup) or use the folder as-is.
 WORK="$SRC"; TMP=""
 if [ -f "$SRC" ] && [[ "$SRC" == *.zip ]]; then
 	TMP="$(mktemp -d)"; log "unzipping to $TMP"
 	unzip -q "$SRC" -d "$TMP"; WORK="$TMP"
+elif [ -d "$SRC" ] && [ -f "$SRC/manifest.json" ]; then
+	archive="$(jq -r '.files_archive // empty' "$SRC/manifest.json")"
+	if [ -n "$archive" ] && [ -f "$SRC/$archive" ]; then
+		TMP="$(mktemp -d)"; log "extracting $archive to $TMP"
+		tar -xf "$SRC/$archive" -C "$TMP"; WORK="$TMP"
+		[ -n "$SQL" ] || SQL="$SRC/$(jq -r '.db_dump // "db.sql.gz"' "$SRC/manifest.json")"
+	fi
 fi
 trap '[ -n "$TMP" ] && rm -rf "$TMP"' EXIT
 

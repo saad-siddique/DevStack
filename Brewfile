@@ -4,6 +4,7 @@ tap "shivammathur/extensions"
 
 brew "composer"
 brew "wp-cli"
+brew "zstd"                           # compressed archives (tar --zstd) for devstack archive --compress
 
 # PHP: every 8.x plus 7.4 for compatibility testing. php@8.4 is the CLI default and the Valet default;
 # the others stay installed with php-fpm stopped until a site is isolated onto them (valet isolate).

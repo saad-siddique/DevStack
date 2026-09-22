@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# site-sizes [--refresh] [--json] : disk footprint of every linked site's folder.
+# --refresh walks the folders with du (minutes for big trees: node_modules, .git) and writes $DATA_DIR/sizes.json;
+# without it the cached numbers are printed. The 03:30 agent refreshes nightly; stack-status embeds the cache as
+# sites[].files_bytes so the app and the dashboard show the same figures. Database sizes are live (stack-status).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+REFRESH=0 ; JSON=0
+for arg in "$@"; do
+	case "$arg" in --refresh) REFRESH=1 ;; --json) JSON=1 ;; *) die "usage: site-sizes [--refresh] [--json]" ;; esac
+done
+STATE="$DATA_DIR/sizes.json"; mkdir -p "$DATA_DIR"
+
+if [ "1" = "$REFRESH" ]; then
+	log "measuring site folders (this walks every file; minutes on big trees)"
+	sizes='{}'
+	for l in "$VALET_HOME"/Sites/*; do
+		[ -L "$l" ] || continue
+		n="$(basename "$l")"; t="$(readlink "$l")"; [ -d "$t" ] || continue
+		kb="$(du -sk "$t" 2> /dev/null | cut -f1 || true)"
+		sizes="$(jq -c --arg n "$n" --argjson b "$(( ${kb:-0} * 1024 ))" '. + {($n): $b}' <<<"$sizes")"
+	done
+	jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson s "$sizes" '{computed_at:$at, sites:$s}' > "$STATE"
+	log "done: $(jq -r '.sites | length' "$STATE") folders, $(jq -r '[.sites[]] | add / 1073741824 | . * 10 | floor / 10' "$STATE") GB"
+fi
+
+if [ ! -f "$STATE" ]; then
+	if [ "1" = "$JSON" ]; then echo '{"computed_at":null,"sites":{}}'; else echo "no sizes yet: devstack sizes --refresh"; fi
+	exit 0
+fi
+if [ "1" = "$JSON" ]; then cat "$STATE"
+else
+	jq -r '"folder sizes as of \(.computed_at)", (.sites | to_entries | sort_by(-.value) | .[] | "\(.value / 1073741824 * 10 | floor / 10) GB\t\(.key)")' "$STATE" | column -t -s $'\t'
+fi
