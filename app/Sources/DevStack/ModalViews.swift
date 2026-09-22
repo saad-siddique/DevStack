@@ -61,7 +61,6 @@ final class FormModel: ObservableObject {
 
 struct NewSiteView: View {
 	@EnvironmentObject private var state: AppState
-	@Environment(\.dismiss) private var dismiss
 	@StateObject private var form = FormModel()
 	private var name: String { form.name }
 	private var php: String { form.php }
@@ -99,7 +98,7 @@ struct NewSiteView: View {
 		}
 		.formStyle(.grouped)
 		.safeAreaInset(edge: .bottom) {
-			FormFooter(cancel: { dismiss() }, action: "Create site", enabled: canCreate) {
+			FormFooter(cancel: { state.closeModal() }, action: "Create site", enabled: canCreate) {
 				state.createSite(name: name, php: php, empty: empty, adminUser: form.adminUser, adminPassword: form.adminPassword, adminEmail: form.adminEmail)
 			}
 		}
@@ -131,7 +130,6 @@ struct FormFooter: View {
 
 struct ImportSiteView: View {
 	@EnvironmentObject private var state: AppState
-	@Environment(\.dismiss) private var dismiss
 	@StateObject private var form = FormModel()
 	private var name: String { form.name }
 	private var source: String { form.source }
@@ -171,7 +169,7 @@ struct ImportSiteView: View {
 		}
 		.formStyle(.grouped)
 		.safeAreaInset(edge: .bottom) {
-			FormFooter(cancel: { dismiss() }, action: "Import site", enabled: canImport) { state.importSite(name: name, source: source, sql: sql, php: php) }
+			FormFooter(cancel: { state.closeModal() }, action: "Import site", enabled: canImport) { state.importSite(name: name, source: source, sql: sql, php: php) }
 		}
 		.frame(width: 520, height: 360)
 		.navigationTitle("Import site")
@@ -206,7 +204,6 @@ private func choose(files: Bool, folders: Bool, types: [UTType], _ done: (String
 
 struct CloneSiteView: View {
 	@EnvironmentObject private var state: AppState
-	@Environment(\.dismiss) private var dismiss
 	let site: Site
 	@StateObject private var form = FormModel()
 
@@ -227,7 +224,7 @@ struct CloneSiteView: View {
 		}
 		.formStyle(.grouped)
 		.safeAreaInset(edge: .bottom) {
-			FormFooter(cancel: { dismiss() }, action: "Clone site", enabled: canClone) { state.clone(site, as: form.name, php: form.php) }
+			FormFooter(cancel: { state.closeModal() }, action: "Clone site", enabled: canClone) { state.clone(site, as: form.name, php: form.php) }
 		}
 		.frame(width: 480, height: 330)
 		.navigationTitle("Duplicate \(site.name)")
@@ -238,7 +235,6 @@ struct CloneSiteView: View {
 
 struct BackupsView: View {
 	@EnvironmentObject private var state: AppState
-	@Environment(\.dismiss) private var dismiss
 	let initialFilter: String
 	@StateObject private var form = FormModel()
 	@StateObject private var pending = PendingAction()
@@ -282,7 +278,7 @@ struct BackupsView: View {
 			HStack {
 				Text("A restore recreates the site exactly as it was: same address, PHP version, database and logins.").font(.caption).foregroundStyle(.secondary)
 				Spacer()
-				Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+				Button("Close") { state.closeModal() }.keyboardShortcut(.cancelAction)
 			}
 			.padding(12)
 		}
@@ -335,7 +331,6 @@ struct BackupsView: View {
 
 struct RemoveSiteView: View {
 	@EnvironmentObject private var state: AppState
-	@Environment(\.dismiss) private var dismiss
 	let site: Site
 	@StateObject private var form = FormModel()
 	private var backupFirst: Bool { form.backupFirst }
@@ -362,7 +357,7 @@ struct RemoveSiteView: View {
 			.padding(.leading, 46)
 			HStack {
 				Spacer()
-				Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+				Button("Cancel") { state.closeModal() }.keyboardShortcut(.cancelAction)
 				Button(backupFirst ? (form.compress ? "Compress, back up and remove" : "Back up and remove") : "Remove") { state.remove(site, backupFirst: backupFirst, compress: form.compress) }
 					.keyboardShortcut(.defaultAction).tint(.red)
 			}
@@ -377,7 +372,6 @@ struct RemoveSiteView: View {
 
 struct TaskView: View {
 	@EnvironmentObject private var state: AppState
-	@Environment(\.dismiss) private var dismiss
 
 	var body: some View {
 		let t = state.task
@@ -428,7 +422,7 @@ struct TaskView: View {
 					.fixedSize().disabled(t.running)
 				}
 				Button("Copy log") { state.copy(t.lines.map(\.text).joined(separator: "\n")) }
-				Button(t.running ? "Hide" : "Close") { dismiss() }.keyboardShortcut(.cancelAction)
+				Button(t.running ? "Hide" : "Close") { state.closeModal() }.keyboardShortcut(.cancelAction)
 			}
 		}
 		.padding(16)

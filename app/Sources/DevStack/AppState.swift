@@ -69,8 +69,43 @@ final class AppState: ObservableObject {
 	let installed = Devstack.isInstalled
 	/// Snapshot mode: fixture data on screen, never replaced by a real status read.
 	private var frozen = false
-	/// Set by the panel (it owns the SwiftUI openWindow action); jobs started from anywhere use it.
-	var showModalWindow: (() -> Void)?
+	/// The one ordinary window (forms, backups, task log, hotkey panel), owned here so anything can open it any time.
+	private var modalWindowStore: NSWindow?
+	private var modalWindow: NSWindow {
+		if let w = modalWindowStore { return w }
+		let host = NSHostingController(rootView: ModalView().environmentObject(self))
+		host.sizingOptions = [.preferredContentSize]
+		let w = NSWindow(contentViewController: host)
+		w.styleMask = [.titled, .closable, .miniaturizable]
+		w.isReleasedWhenClosed = false
+		w.title = "DevStack"
+		w.center()
+		modalWindowStore = w
+		return w
+	}
+
+	func presentModal() {
+		let w = modalWindow
+		w.title = modalTitle
+		if !w.isVisible { w.center() }
+		w.makeKeyAndOrderFront(nil)
+		NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+	}
+
+	func closeModal() { modalWindowStore?.orderOut(nil) }
+
+	private var modalTitle: String {
+		switch modal {
+		case .newSite: return "New site"
+		case .importSite: return "Import site"
+		case .remove(let s): return "Archive \(s.name)"
+		case .clone(let s): return "Duplicate \(s.name)"
+		case .backups: return "Backups"
+		case .panel: return "DevStack"
+		case .task: return task.title.isEmpty ? "Task" : task.title
+		case nil: return "DevStack"
+		}
+	}
 	private var loop: Task<Void, Never>?
 
 	private let notifier = Notifier()
@@ -95,22 +130,14 @@ final class AppState: ObservableObject {
 		notifier.post(title: title, body: body)
 	}
 
-	/// ⌃⌥D: SwiftUI gives no way to open a MenuBarExtra from code (its popover is not even in NSApp.windows, and an
-	/// Accessibility press on the status item does not open it), so the hotkey shows the same panel in a window.
+	/// ⌃⌥D: SwiftUI gives no way to open a MenuBarExtra from code (its popover is not even in NSApp.windows), so the
+	/// hotkey shows the same panel in a window; pressing again while it is up hides it.
 	func togglePanel() {
-		if let button = NSApp.windows.compactMap({ $0.contentView }).lazy.compactMap({ Self.statusBarButton(in: $0) }).first {
-			button.performClick(nil)
-		} else {
-			modal = .panel
-			showModalWindow?()
-		}
+		if let w = modalWindowStore, w.isVisible, modal == .panel { w.orderOut(nil); return }
+		modal = .panel
+		presentModal()
 	}
 
-	private static func statusBarButton(in view: NSView) -> NSStatusBarButton? {
-		if let b = view as? NSStatusBarButton { return b }
-		for sub in view.subviews { if let b = statusBarButton(in: sub) { return b } }
-		return nil
-	}
 
 	var runaways: [UsageSampler.Runaway] { sampler.runaways }
 
@@ -386,7 +413,7 @@ final class AppState: ObservableObject {
 		guard !task.running else { errorMessage = "Another task is still running."; return }
 		task = TaskLog(title: title, command: "devstack " + args.joined(separator: " "), running: true)
 		modal = .task
-		showModalWindow?()
+		presentModal()
 		Task {
 			let status = await Devstack.stream(args) { [weak self] line in
 				Task { @MainActor in self?.task.lines.append(line) }

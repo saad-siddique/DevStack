@@ -3,7 +3,6 @@ import SwiftUI
 
 struct PanelView: View {
 	@EnvironmentObject private var state: AppState
-	@Environment(\.openWindow) private var openWindow
 	@Environment(\.colorScheme) private var scheme
 	@AppStorage("panel.tab") private var tab: Tab = .sites
 
@@ -56,10 +55,7 @@ struct PanelView: View {
 		.background(t.dark ? Color.black.opacity(0.18) : Color.white.opacity(0.28))   // tint on the popover's own material: one continuous glass
 		.tint(t.accent)
 		.ignoresSafeArea()
-		.onAppear {
-			state.showModalWindow = { openWindow(id: "modal"); activate() }
-			state.panelDidAppear()
-		}
+		.onAppear { state.panelDidAppear() }
 		.onDisappear { state.panelDidDisappear() }
 	}
 
@@ -176,12 +172,7 @@ struct PanelView: View {
 
 	private func present(_ modal: AppState.Modal) {
 		state.modal = modal
-		openWindow(id: "modal")
-		activate()
-	}
-
-	private func activate() {
-		NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+		state.presentModal()
 	}
 }
 

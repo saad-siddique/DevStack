@@ -65,11 +65,5 @@ struct DevStackApp: App {
 			MenuBarLabel(alert: state.health == .degraded || state.health == .down, samples: state.menuBarGraph ? state.sampler.samples.map(\.cpu) : nil)
 		}
 		.menuBarExtraStyle(.window)
-
-		Window("DevStack", id: "modal") {
-			ModalView().environmentObject(state)
-		}
-		.windowResizability(.contentSize)
-		.defaultPosition(.center)
 	}
 }
