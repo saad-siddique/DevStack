@@ -64,11 +64,29 @@ cd ~/Work/DevStack
 ./bootstrap.sh --app
 ```
 
-`bootstrap.sh` is idempotent. Run it again after every `git pull`; it only changes what differs. A fresh Mac takes
-10–20 minutes, mostly downloading PHP versions. In order, it:
+`bootstrap.sh` is idempotent. Run it again after every `git pull`, or after an interruption: it picks up where it
+stopped and only changes what differs. Everything it prints also goes to `~/Library/Logs/DevStack/bootstrap-*.log`.
 
-1. Taps `shivammathur/php` and `shivammathur/extensions`, then runs `brew bundle` on the `Brewfile`: PHP 7.4–8.6,
-   mysql@8.4, mailpit, redis, memcached, composer, wp-cli, and redis/imagick/memcached/xdebug for every PHP version.
+**How long it takes.** On an Apple Silicon Mac running a current macOS, where every formula has a prebuilt bottle,
+a fresh install takes 10–20 minutes, mostly downloads. Each formula reports `bottle` or `source` before it starts
+and its elapsed time when it finishes, so you always know what it is doing. **A formula without a bottle for your
+Mac is compiled from source**: a few minutes for a PHP extension, up to an hour for a PHP version, and there is no
+progress bar while it compiles, only CPU in Activity Monitor. That happens on Intel Macs and on macOS releases older
+than the tap supports. If that is you, install fewer PHP versions first and add the rest later:
+
+```bash
+./bootstrap.sh --app --php 7.4,8.4      # or DEVSTACK_PHP_VERSIONS=7.4,8.4 ./bootstrap.sh --app
+```
+
+**If it looks stuck**, open another terminal: `tail -f ~/Library/Logs/DevStack/brew-<formula>.log` shows the
+current install, and `top -o cpu` will show `clang` or `cc1` if it is compiling. Pressing Ctrl-C and running
+`./bootstrap.sh --app` again is always safe.
+
+In order, it:
+
+1. Taps `shivammathur/php` and `shivammathur/extensions`, then installs the `Brewfile` one formula at a time with
+   progress: PHP 7.4–8.6, mysql@8.4, mailpit, redis, memcached, composer, wp-cli, cloudflared, zstd, and
+   redis/imagick/memcached/xdebug for every PHP version.
 2. Links `php@8.4` as the command-line `php`, copies `php/zz-uo-dev.ini` into every `/opt/homebrew/etc/php/<v>/conf.d/`
    (512 MB memory, 1 GB uploads, `display_errors` on, `sendmail_path` → Mailpit, Xdebug trigger mode on port 9003)
    and switches Xdebug off by default.
@@ -462,7 +480,9 @@ docs/                 migrating-from-mamp.md, screenshots (docs/img); docs/priva
 
 ## Things learned the hard way
 
-- `brew bundle` un-links keg-only `php@8.4`; the Brewfile pins `link: true` and bootstrap re-links before Valet runs.
+- `brew bundle` un-links keg-only `php@8.4` and hides what it is doing for minutes at a time (it printed 45
+  "Installing …" lines on a teammate's Mac and then sat silent in a from-source build). Bootstrap now installs the
+  Brewfile one formula at a time, says bottle or source up front, and re-links `php@8.4` itself before Valet runs.
 - Valet's `valet` wrapper re-execs itself through `sudo`; the sudoers alias from `valet trust` matches
   `/opt/homebrew/bin/valet` only, and in a non-TTY shell the wrapper's own sudo hop still prompts. `valet()` in
   `bin/lib.sh` goes through `sudo -n` directly once trust exists.

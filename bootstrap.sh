@@ -3,7 +3,19 @@
 # Needs your sudo password once (valet install / valet trust); after that brew+valet are passwordless.
 # --app also builds the menu-bar app from app/ and installs it to /Applications/DevStack.app.
 set -euo pipefail
-WITH_APP=0; for a in "$@"; do case "$a" in --app) WITH_APP=1 ;; *) echo "unknown flag $a (bootstrap.sh [--app])"; exit 2 ;; esac; done
+WITH_APP=0; PHP_ONLY="${DEVSTACK_PHP_VERSIONS:-}"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--app) WITH_APP=1 ;;
+		--php) PHP_ONLY="$2"; shift ;; --php=*) PHP_ONLY="${1#--php=}" ;;
+		*) echo "unknown flag $1 (bootstrap.sh [--app] [--php 7.4,8.4])"; exit 2 ;;
+	esac
+	shift
+done
+# Everything printed also lands in a log, so a stuck-looking run can be inspected from another terminal.
+BOOT_LOG="$HOME/Library/Logs/DevStack/bootstrap-$(date +%Y%m%d-%H%M%S).log"
+mkdir -p "$(dirname "$BOOT_LOG")"; exec > >(tee -a "$BOOT_LOG") 2>&1
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLEANUP=1
 
 # Never let a leftover MAMP PATH entry (old shells, IDE terminals) leak into brew/valet/php resolution.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAMP' | paste -sd: -)"; export PATH
@@ -37,17 +49,71 @@ ensure_brew() {
 	ok "Homebrew $(brew --version | head -1 | awk '{print $2}') at $BREW_PREFIX"
 }
 
+# Installs the Brewfile one formula at a time so the run shows what it is doing. `brew bundle` prints "Installing X"
+# and then nothing for the whole install, which on a Mac without a bottle (older macOS, Intel) means a silent
+# from-source build that looks like a hang. Here every formula reports bottle/source, elapsed time, and failures
+# with the log to read. --php 7.4,8.4 (or DEVSTACK_PHP_VERSIONS) limits the PHP versions and their extensions.
 ensure_formulae() {
-	log "Homebrew formulae"
+	log "Homebrew ($(uname -m), macOS $(sw_vers -productVersion), $(brew --version | head -1))"
 	local t
 	for t in shivammathur/php shivammathur/extensions; do
-		brew tap "$t" > /dev/null
+		brew tap "$t" > /dev/null 2>&1 || brew tap "$t"
 		if brew help trust > /dev/null 2>&1; then brew trust "$t" > /dev/null 2>&1 || true; fi
 	done
-	brew bundle install --file="$REPO_DIR/Brewfile" --no-upgrade
+	log "brew update (a first run can take a few minutes)"
+	brew update -q > /dev/null 2>&1 || warn "brew update failed (offline?); continuing with what Homebrew already knows"
+
+	local -a want=() ; local f short
+	while IFS= read -r f; do
+		short="${f##*/}"
+		if [ -n "$PHP_ONLY" ]; then
+			case "$short" in
+				php@*|xdebug@*|redis@*|imagick@*|memcached@*)
+					printf ',%s,' "$PHP_ONLY" | grep -q ",${short#*@}," || continue ;;
+			esac
+		fi
+		want+=("$f")
+	done < <(sed -nE 's/^brew "([^"]+)".*/\1/p' "$REPO_DIR/Brewfile")
+	[ -n "$PHP_ONLY" ] && log "PHP versions limited to: $PHP_ONLY"
+
+	local installed n=0 total="${#want[@]}" i=0 t0 secs tag from
+	installed="$(brew list --formula --full-name 2> /dev/null | tr '\n' ' ')"
+	for f in "${want[@]}"; do
+		i=$((i+1)); short="${f##*/}"
+		# Fast path: the full-name list. Fallback: ask brew directly (aliases such as php@8.5 → php, tap formulae listed
+		# under a different name).
+		if printf ' %s ' "$installed" | grep -qE " (${f}|${short}) " || brew list --formula --versions "$f" > /dev/null 2>&1; then
+			ok "[$i/$total] $short present"; continue
+		fi
+		# Bottle or not? `brew --cache` names what Homebrew would download for this Mac: a *.bottle.tar.gz, or the
+		# source tarball, which means a compile (minutes for an extension, up to an hour for a PHP version).
+		case "$(brew --cache --formula "$f" 2> /dev/null)" in
+			*.bottle.*) from="bottle" ;;
+			*) from="SOURCE BUILD: no bottle for this Mac, expect a long compile" ;;
+		esac
+		printf '\033[1;34m==>\033[0m [%d/%d] installing %s (%s)\n' "$i" "$total" "$short" "$from"
+		t0="$(date +%s)"; blog="$HOME/Library/Logs/DevStack/brew-$short.log"
+		brew install --formula "$f" > "$blog" 2>&1 &
+		local bpid=$!
+		# Heartbeat while it runs: elapsed time and the last thing Homebrew wrote, so a long install is never silent.
+		while kill -0 "$bpid" 2> /dev/null; do
+			sleep 10
+			kill -0 "$bpid" 2> /dev/null || break
+			printf '    … %ds  %s\n' "$(( $(date +%s) - t0 ))" "$(tail -n 1 "$blog" 2> /dev/null | tr -d '\r' | cut -c1-90)"
+		done
+		if wait "$bpid"; then
+			secs=$(( $(date +%s) - t0 )); ok "[$i/$total] $short installed in ${secs}s"; n=$((n+1))
+		else
+			warn "[$i/$total] $short FAILED — see ~/Library/Logs/DevStack/brew-$short.log (last lines follow)"
+			tail -5 "$HOME/Library/Logs/DevStack/brew-$short.log" | sed 's/^/      /'
+			case "$short" in php@*|mysql@8.4|nginx|dnsmasq) echo "cannot continue without $short"; exit 1 ;; esac
+		fi
+	done
+	# The `php` formula (php@8.5 alias) must never hold the php symlink; php@8.4 is linked by ensure_php_linked.
+	brew unlink php > /dev/null 2>&1 || true
 	# mysql@8.4 is keg-only; wp db export/import want mysql/mysqldump on PATH.
 	brew link --force --overwrite mysql@8.4 > /dev/null 2>&1 || true
-	ok "formulae present"
+	ok "formulae present ($n newly installed)"
 }
 
 ensure_php_linked() {
