@@ -3,7 +3,8 @@
 import Foundation
 
 enum Devstack {
-	static let binary = "/opt/homebrew/bin/devstack"
+	/// bootstrap links bin/devstack into Homebrew's bin: /opt/homebrew on Apple Silicon, /usr/local on Intel.
+	static let binary: String = ["/opt/homebrew/bin/devstack", "/usr/local/bin/devstack"].first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/opt/homebrew/bin/devstack"
 	static var isInstalled: Bool { FileManager.default.isExecutableFile(atPath: binary) }
 
 	struct Result {
@@ -39,7 +40,7 @@ enum Devstack {
 		p.executableURL = URL(fileURLWithPath: binary)
 		p.arguments = args
 		var env = ProcessInfo.processInfo.environment
-		env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
+		env["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 		env["TERM"] = "dumb"
 		env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
 		env["NO_COLOR"] = "1"

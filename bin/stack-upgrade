@@ -90,7 +90,7 @@ if [ "check" != "$MODE" ]; then
 	# A PHP upgrade keeps etc/php/<v> but can drop the CLI link; make sure the default stays linked and ini drop-ins are present.
 	if jq -e '.[] | select(.name | startswith("php"))' <<<"$upgraded" > /dev/null; then
 		"$BREW_PREFIX/bin/brew" link --force --overwrite "$DEFAULT_PHP" > /dev/null 2>&1 || true
-		for d in "$BREW_PREFIX"/etc/php/*/conf.d; do cmp -s "$REPO_DIR/php/zz-uo-dev.ini" "$d/zz-uo-dev.ini" || cp "$REPO_DIR/php/zz-uo-dev.ini" "$d/zz-uo-dev.ini"; done
+		for d in "$BREW_PREFIX"/etc/php/*/conf.d; do sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" | cmp -s - "$d/zz-uo-dev.ini" || sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" > "$d/zz-uo-dev.ini"; done
 	fi
 	restarted='[]'
 	for svc in $(printf '%s\n' "${restart[@]+"${restart[@]}"}" | sort -u); do

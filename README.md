@@ -46,7 +46,10 @@ MySQL 8.4 · Mailpit · Redis · Memcached · WP-CLI · phpMyAdmin · one global
 
 ## Requirements
 
-- An Apple Silicon Mac on macOS 14 or newer. Paths assume `/opt/homebrew`; Intel Macs are not supported.
+- An Apple Silicon Mac on macOS 14 or newer, with the **native** Homebrew in `/opt/homebrew`. Bootstrap refuses to
+  start from a terminal running under Rosetta or with the Intel Homebrew in `/usr/local` on an Apple Silicon Mac,
+  because Homebrew treats both as Tier 3 and compiles every formula from source for hours; the message tells you how
+  to switch. Intel Macs work with `/usr/local` but get the same from-source treatment on recent macOS.
 - [Homebrew](https://brew.sh).
 - Xcode Command Line Tools (`xcode-select --install`) or Xcode. Either one builds the app. If you install Xcode,
   open it once and accept its licence (or run `sudo xcodebuild -license accept`); until then `bin/app` notices that
@@ -480,6 +483,10 @@ docs/                 migrating-from-mamp.md, screenshots (docs/img); docs/priva
 
 ## Things learned the hard way
 
+- A Mac migrated from Intel with Migration Assistant, or a Terminal with "Open using Rosetta" ticked, reports
+  `x86_64` on an M-series chip and carries an Intel Homebrew in `/usr/local`. Homebrew then says "Tier 3", has no
+  bottles, and builds PHP from source until the missing Command Line Tools make it fail. Bootstrap checks
+  `hw.optional.arm64`, `sysctl.proc_translated` and the prefix before installing anything.
 - `brew bundle` un-links keg-only `php@8.4` and hides what it is doing for minutes at a time (it printed 45
   "Installing …" lines on a teammate's Mac and then sat silent in a from-source build). Bootstrap now installs the
   Brewfile one formula at a time, says bottle or source up front, and re-links `php@8.4` itself before Valet runs.

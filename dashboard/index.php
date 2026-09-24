@@ -15,6 +15,7 @@ declare( strict_types=1 );
 
 $repo_bin = dirname( __DIR__ ) . '/bin';
 $home     = getenv( 'HOME' ) ?: '/Users/' . get_current_user();
+$brew     = is_dir( '/opt/homebrew/bin' ) ? '/opt/homebrew' : '/usr/local';   // Apple Silicon or Intel Homebrew
 $api      = isset( $_GET['api'] ) ? (string) $_GET['api'] : '';
 
 /**
@@ -27,7 +28,7 @@ function devstack_run( array $argv, string $home ): array {
 	$env  = array(
 		'HOME' => $home,
 		'USER' => get_current_user(),
-		'PATH' => '/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin',
+		'PATH' => $brew . '/bin:' . $brew . '/sbin:/usr/bin:/bin:/usr/sbin:/sbin',
 		'LANG' => 'en_US.UTF-8',
 	);
 	$spec = array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) );
@@ -114,7 +115,7 @@ if ( '' !== $api ) {
 
 	if ( 'service' === $api && $is_write ) {
 		$allowed_names = array( 'nginx', 'dnsmasq', 'mysql@8.4', 'mailpit', 'redis', 'memcached' );
-		foreach ( glob( '/opt/homebrew/etc/php/*/conf.d', GLOB_ONLYDIR ) ?: array() as $conf_dir ) {
+		foreach ( glob( $brew . '/etc/php/*/conf.d', GLOB_ONLYDIR ) ?: array() as $conf_dir ) {
 			$allowed_names[] = 'php@' . basename( dirname( $conf_dir ) );
 		}
 		$allowed_ops   = array( 'start', 'stop', 'restart' );
@@ -179,7 +180,7 @@ if ( '' !== $api ) {
 		// du over every site takes minutes: start it detached and let the next status reload pick the numbers up.
 		// No nohup: php-fpm has no console and macOS's nohup refuses to run without one. A plain background job survives.
 		$cmd = sprintf( '( %s --refresh --json < /dev/null > /dev/null 2>&1 & )', escapeshellarg( $repo_bin . '/site-sizes' ) );
-		exec( 'PATH=/opt/homebrew/bin:/usr/bin:/bin HOME=' . escapeshellarg( $home ) . ' ' . $cmd );
+		exec( 'PATH=' . $brew . '/bin:/usr/bin:/bin HOME=' . escapeshellarg( $home ) . ' ' . $cmd );
 		devstack_json( 202, array( 'started' => true ) );
 	}
 
@@ -195,7 +196,7 @@ if ( '' !== $api ) {
 	if ( 'xdebug' === $api && $is_write ) {
 		$php = (string) ( $_POST['php'] ?? '' );
 		$op  = (string) ( $_POST['op'] ?? '' );
-		$php_versions = array_map( static function ( $d ) { return basename( dirname( $d ) ); }, glob( '/opt/homebrew/etc/php/*/conf.d', GLOB_ONLYDIR ) ?: array() );
+		$php_versions = array_map( static function ( $d ) { return basename( dirname( $d ) ); }, glob( $brew . '/etc/php/*/conf.d', GLOB_ONLYDIR ) ?: array() );
 		if ( ! in_array( $php, $php_versions, true ) || ! in_array( $op, array( 'on', 'off' ), true ) ) {
 			devstack_json( 400, array( 'error' => 'Unknown PHP version or operation.' ) );
 		}

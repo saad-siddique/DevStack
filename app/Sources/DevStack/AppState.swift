@@ -332,7 +332,7 @@ final class AppState: ObservableObject {
 		let p = Process()
 		p.executableURL = URL(fileURLWithPath: "/bin/bash")
 		let log = NSHomeDirectory() + "/Library/Logs/DevStack/app-install.log"
-		p.arguments = ["-c", "sleep 1; PATH=/opt/homebrew/bin:/usr/bin:/bin /opt/homebrew/bin/devstack app install > '\(log)' 2>&1"]
+		p.arguments = ["-c", "sleep 1; PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin '\(Devstack.binary)' app install > '\(log)' 2>&1"]
 		try? FileManager.default.createDirectory(atPath: (log as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
 		do { try p.run() } catch { errorMessage = "Could not start the rebuild: \(error.localizedDescription)"; return }
 		NSApp.terminate(nil)

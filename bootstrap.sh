@@ -45,8 +45,34 @@ valet() {
 
 ensure_brew() {
 	command -v brew > /dev/null || { echo "Homebrew missing: https://brew.sh"; exit 1; }
-	xcode-select -p > /dev/null 2>&1 || { echo "Xcode / Command Line Tools missing"; exit 1; }
-	ok "Homebrew $(brew --version | head -1 | awk '{print $2}') at $BREW_PREFIX"
+	# Apple Silicon running an Intel shell (Rosetta) or an Intel Homebrew in /usr/local: Homebrew calls that Tier 3,
+	# ships no bottles for it, and compiles every formula from source for hours. Stop before that starts.
+	if [ "1" = "$(sysctl -n hw.optional.arm64 2> /dev/null)" ]; then
+		if [ "1" = "$(sysctl -n sysctl.proc_translated 2> /dev/null)" ] || [ "x86_64" = "$(uname -m)" ]; then
+			cat <<MSG
+This is an Apple Silicon Mac but this terminal runs under Rosetta (x86_64), so Homebrew would build everything from
+source. Open a native terminal: Finder > Applications > Utilities > Terminal.app > Get Info > untick "Open using Rosetta",
+or run:   arch -arm64 zsh
+then run bootstrap again.
+MSG
+			exit 1
+		fi
+		if [ "/usr/local" = "$BREW_PREFIX" ]; then
+			cat <<MSG
+This is an Apple Silicon Mac but Homebrew is the Intel build in /usr/local (Tier 3: no bottles, everything compiles).
+Install the native Homebrew, put it first on PATH, then run bootstrap again:
+  /bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  echo 'eval "\$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile && eval "\$(/opt/homebrew/bin/brew shellenv)"
+The Intel Homebrew in /usr/local can stay; nothing here uses it.
+MSG
+			exit 1
+		fi
+	fi
+	xcode-select -p > /dev/null 2>&1 || { echo "Command Line Tools missing: run  xcode-select --install  (or install Xcode), then run bootstrap again"; exit 1; }
+	if brew config 2> /dev/null | grep -qE '^CLT: N/A' && ! [ -d /Applications/Xcode.app ]; then
+		echo "Homebrew cannot see the Command Line Tools (brew config says CLT: N/A). Run  xcode-select --install  and rerun."; exit 1
+	fi
+	ok "Homebrew $(brew --version | head -1 | awk '{print $2}') at $BREW_PREFIX ($(uname -m), macOS $(sw_vers -productVersion))"
 }
 
 # Installs the Brewfile one formula at a time so the run shows what it is doing. `brew bundle` prints "Installing X"
@@ -105,7 +131,9 @@ ensure_formulae() {
 			secs=$(( $(date +%s) - t0 )); ok "[$i/$total] $short installed in ${secs}s"; n=$((n+1))
 		else
 			warn "[$i/$total] $short FAILED — see ~/Library/Logs/DevStack/brew-$short.log (last lines follow)"
-			tail -5 "$HOME/Library/Logs/DevStack/brew-$short.log" | sed 's/^/      /'
+			tail -5 "$blog" | sed 's/^/      /'
+			grep -q 'Command Line Tools' "$blog" && warn "Homebrew wants newer Command Line Tools: xcode-select --install (or sudo xcode-select -s /Applications/Xcode.app after installing Xcode), then rerun"
+			grep -q 'Tier 3' "$blog" && warn "Tier 3 = Homebrew has no bottles for this Mac/macOS; on Apple Silicon check for Rosetta or an Intel Homebrew (see the top of this run)"
 			case "$short" in php@*|mysql@8.4|nginx|dnsmasq) echo "cannot continue without $short"; exit 1 ;; esac
 		fi
 	done
@@ -138,8 +166,8 @@ ensure_php_ini() {
 		fi
 		dst="$BREW_PREFIX/etc/php/$v/conf.d/zz-uo-dev.ini"
 		[ -d "$(dirname "$dst")" ] || { warn "no conf.d for PHP $v (formula not installed?)"; continue; }
-		if ! cmp -s "$REPO_DIR/php/zz-uo-dev.ini" "$dst"; then
-			cp "$REPO_DIR/php/zz-uo-dev.ini" "$dst"; ok "installed $dst"
+		if ! sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" | cmp -s - "$dst"; then
+			sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" > "$dst"; ok "installed $dst"
 		else
 			ok "up to date: $dst"
 		fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # devstack <command> [args...] : the one global entry point for every bin/ script.
-# bootstrap.sh links this file to /opt/homebrew/bin/devstack, so it works from any directory, from IDE terminals
+# bootstrap.sh links this file to $(brew --prefix)/bin/devstack, so it works from any directory, from IDE terminals
 # and from the menu-bar app (which starts with a bare PATH). Verbs map to bin/ scripts; any bin/ name also works.
 set -euo pipefail
 
@@ -11,7 +11,7 @@ while [ -L "$self" ]; do
 	case "$self" in /*) ;; *) self="$dir/$self" ;; esac
 done
 REPO="$(cd "$(dirname "$self")/.." && pwd)"; BIN="$REPO/bin"
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"   # Apple Silicon first, Intel prefix second
 TLD="${TLD:-test}"
 
 usage() {
