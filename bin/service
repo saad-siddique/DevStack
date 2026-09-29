@@ -35,9 +35,19 @@ if [ "status" != "$OP" ]; then
 		esac
 		die "brew services $OP $NAME failed$hint"
 	fi
-	sleep 1
 fi
 
-status_json="$( { sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; } \
-	| jq -s --arg n "$FORMULA" --arg shown "$NAME" 'add | map(select(.name == $n)) | (max_by(if .status == "started" then 1 else 0 end) // {name:$n,status:"unknown",user:null}) | {name:$shown, status, user}')"
+current_status() {
+	{ sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; } \
+		| jq -s -c --arg n "$FORMULA" --arg shown "$NAME" 'add | map(select(.name == $n)) | (max_by(if .status == "started" then 1 else 0 end) // {name:$n,status:"unknown",user:null}) | {name:$shown, status, user}'
+}
+status_json="$(current_status)"
+# launchd reports "error" while the old process is still shutting down (MySQL takes ~10 s), so wait for "started".
+if [ "start" = "$OP" ] || [ "restart" = "$OP" ]; then
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+		[ "started" = "$(jq -r .status <<<"$status_json")" ] && break
+		sleep 1
+		status_json="$(current_status)"
+	done
+fi
 if [ "1" = "$JSON" ]; then echo "$status_json"; else echo "$status_json" | jq -r '"\(.name): \(.status)\(if .user then " (" + .user + ")" else "" end)"'; fi

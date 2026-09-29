@@ -17,7 +17,7 @@
 	var logData = null;
 
 	var $ = function ( id ) { return document.getElementById( id ); };
-	var TABS = [ 'overview', 'php', 'services', 'logs', 'tools' ];
+	var TABS = [ 'overview', 'php', 'services', 'upgrades', 'logs', 'tools' ];
 	var currentTab = 'overview';
 
 	function setTab( name, push ) {
@@ -388,43 +388,84 @@
 		return -1 === i ? null : ( urls[ i ] || urls[ 0 ] );
 	}
 
-	// Homebrew state of the stack (bin/stack-upgrade): what the nightly run did, what waits, and the nightly setting.
+	// Homebrew state of the stack (bin/stack-upgrade): what waits, what the last run did, and the nightly setting.
+	var KIND = {
+		major: { label: 'Major', order: 0, title: 'New major version: breaking changes are possible. Review before upgrading.' },
+		minor: { label: 'Minor', order: 1, title: 'New features. Review before upgrading.' },
+		patch: { label: 'Patch', order: 2, title: 'Bug and security fixes.' },
+		rebuild: { label: 'Rebuild', order: 3, title: 'Same version, rebuilt by Homebrew against updated libraries.' }
+	};
+	function kindOf( a ) { return a.rebuild ? 'rebuild' : ( KIND[ a.kind ] ? a.kind : 'patch' ); }
+	function when( iso ) { return new Date( iso ).toLocaleString( [], { weekday: 'short', hour: '2-digit', minute: '2-digit' } ); }
+	function versionTable( head, rows ) {
+		var tb = el( 'tbody' );
+		rows.forEach( function ( r ) { tb.appendChild( el( 'tr', {}, r ) ); } );
+		return el( 'table', { 'class': 'list' }, [
+			el( 'thead', {}, [ el( 'tr', {}, head.map( function ( h ) { return el( 'th', { scope: 'col', 'class': h[ 1 ] || '', text: h[ 0 ] } ); } ) ) ] ),
+			tb
+		] );
+	}
+
 	function renderUpgrades( s ) {
-		var box = $( 'upgrades' );
-		var u = s.upgrades;
-		box.textContent = '';
-		if ( ! u ) { box.hidden = true; return; }
-		var avail = u.available || [];
+		var u = s.upgrades || {};
+		var avail = ( u.available || [] ).slice().sort( function ( a, b ) {
+			return ( KIND[ kindOf( a ) ].order - KIND[ kindOf( b ) ].order ) || a.short.localeCompare( b.short );
+		} );
 		var review = avail.filter( function ( a ) { return 'patch' !== a.kind; } );
 		var patches = avail.filter( function ( a ) { return 'patch' === a.kind; } );
 		var run = u.last_run;
-		var recent = run && run.at && ( Date.now() - Date.parse( run.at ) ) < 86400000 && ( ( run.upgraded || [] ).length || ( run.failed || [] ).length );
-		var line = function ( a ) { return a.short + ' ' + a.installed + ' → ' + a.current; };
-		var rows = [];
-		if ( recent && ( run.upgraded || [] ).length ) {
-			rows.push( el( 'p', { 'class': 'ok', text: 'Upgraded ' + new Date( run.at ).toLocaleString( [], { hour: '2-digit', minute: '2-digit', weekday: 'short' } ) + ': ' + run.upgraded.map( function ( x ) { return x.name + ' ' + x.from + ' → ' + x.to; } ).join( ', ' ) } ) );
-		}
-		if ( recent && ( run.failed || [] ).length ) {
-			rows.push( el( 'p', { 'class': 'bad', text: 'Failed: ' + run.failed.map( function ( x ) { return x.name; } ).join( ', ' ) + ' — see the upgrade log.' } ) );
-		}
-		if ( review.length ) { rows.push( el( 'p', { text: review.length + ( 1 === review.length ? ' upgrade' : ' upgrades' ) + ' to review: ' + review.map( line ).join( ', ' ) } ) ); }
-		if ( patches.length ) { rows.push( el( 'p', { 'class': 'muted', text: patches.length + ( 1 === patches.length ? ' patch release' : ' patch releases' ) + ( 'off' === u.auto ? ' available: ' : ' apply tonight: ' ) + patches.map( line ).join( ', ' ) } ) ); }
-		if ( ! rows.length && u.checked_at ) { rows.push( el( 'p', { 'class': 'muted', text: 'Stack up to date (checked ' + new Date( u.checked_at ).toLocaleString( [], { hour: '2-digit', minute: '2-digit', weekday: 'short' } ) + ').' } ) ); }
-		var actions = el( 'div', { 'class': 'actions' } );
+		var failed = ( run && run.failed ) || [];
+
+		$( 'upg-checked' ).textContent = u.checked_at ? 'Homebrew releases for the stack. Checked ' + when( u.checked_at ) + '.' : 'Not checked yet.';
+		$( 'upg-avail-count' ).textContent = avail.length ? String( avail.length ) : '';
+		var count = $( 'upg-count' );
+		count.textContent = String( avail.length );
+		count.hidden = 0 === avail.length;
+		navDot( 'upgrades', failed.length > 0 && Date.now() - Date.parse( run.at ) < 86400000 );
+
+		var actions = $( 'upg-actions' );
+		actions.textContent = '';
 		if ( review.length ) { actions.appendChild( button( 'Upgrade all', 'primary', function () { return post( 'upgrade', { mode: 'all' } ); } ) ); }
 		if ( patches.length ) { actions.appendChild( button( review.length ? 'Patches only' : 'Upgrade now', review.length ? '' : 'primary', function () { return post( 'upgrade', { mode: 'auto' } ); } ) ); }
 		actions.appendChild( button( 'Check now', 'quiet', function () { return post( 'upgrade', { mode: 'check' } ); } ) );
-		var auto = el( 'label', { 'class': 'auto' } );
-		var cb = el( 'input', { type: 'checkbox' } );
-		cb.checked = 'off' !== u.auto;
-		cb.addEventListener( 'change', function () { post( 'upgrade-auto', { value: cb.checked ? 'patch' : 'off' } ).then( refresh ); } );
-		auto.appendChild( cb );
-		auto.appendChild( document.createTextNode( ' Apply patch releases automatically at 03:30' ) );
-		actions.appendChild( auto );
-		box.appendChild( el( 'div', { 'class': 'text' }, rows ) );
-		box.appendChild( actions );
-		box.hidden = false;
-		navDot( 'overview', review.length > 0 || ( recent && ( run.failed || [] ).length > 0 ) );
+
+		var cb = $( 'upg-auto' );
+		cb.checked = 'off' !== ( u.auto || 'off' );
+		cb.onchange = function () { post( 'upgrade-auto', { value: cb.checked ? 'patch' : 'off' } ).then( refresh ); };
+
+		var box = $( 'upg-available' );
+		box.textContent = '';
+		if ( ! avail.length ) {
+			box.appendChild( el( 'p', { 'class': 'empty-box', text: 'The stack is up to date.' } ) );
+		} else {
+			box.appendChild( versionTable( [ [ 'Package' ], [ 'Installed' ], [ '', 'arrow' ], [ 'Available' ], [ 'Change' ], [ 'Restarts', 'restarts' ] ], avail.map( function ( a ) {
+				var k = kindOf( a );
+				return [
+					el( 'td', { 'class': 'pkg', text: a.short } ),
+					el( 'td', { 'class': 'v', text: a.installed } ),
+					el( 'td', { 'class': 'arrow', 'aria-hidden': 'true', text: '→' } ),
+					el( 'td', { 'class': 'v to', text: a.current } ),
+					el( 'td', {}, [ el( 'span', { 'class': 'kind ' + k, title: KIND[ k ].title, text: KIND[ k ].label } ) ] ),
+					el( 'td', { 'class': 'restarts', title: 'Restarted after the upgrade when it is running', text: a.restarts || '—' } )
+				];
+			} ) ) );
+		}
+
+		var out = $( 'upg-run' );
+		out.textContent = '';
+		$( 'upg-run-meta' ).textContent = run && run.at ? when( run.at ) + ', ' + ( 'all' === run.mode ? 'everything outdated' : 'patch releases' ) : '';
+		if ( ! run ) {
+			out.appendChild( el( 'p', { 'class': 'empty-box', text: 'No upgrades have run yet.' } ) );
+			return;
+		}
+		var rows = ( run.upgraded || [] ).map( function ( x ) {
+			return [ el( 'td', { 'class': 'pkg', text: x.name } ), el( 'td', { 'class': 'v', text: x.from } ), el( 'td', { 'class': 'arrow', 'aria-hidden': 'true', text: '→' } ), el( 'td', { 'class': 'v to', text: x.to } ), el( 'td', { 'class': 'ok', text: 'Upgraded' } ) ];
+		} ).concat( failed.map( function ( x ) {
+			return [ el( 'td', { 'class': 'pkg', text: x.name } ), el( 'td', { 'class': 'v', text: '' } ), el( 'td', { 'class': 'arrow' } ), el( 'td', { 'class': 'v', text: '' } ), el( 'td', { 'class': 'bad', title: x.error || '', text: 'Failed' } ) ];
+		} ) );
+		if ( rows.length ) { out.appendChild( versionTable( [ [ 'Package' ], [ 'From' ], [ '', 'arrow' ], [ 'To' ], [ 'Result' ] ], rows ) ); }
+		var restarted = run.restarted || [];
+		out.appendChild( el( 'p', { 'class': 'run-note', text: ( rows.length ? '' : 'Nothing to upgrade. ' ) + ( restarted.length ? 'Restarted ' + restarted.join( ', ' ) + '.' : 'No running service needed a restart.' ) + ( failed.length ? ' Details: devstack logs upgrade.' : '' ) } ) );
 	}
 
 	function logKey( d ) { return d.source + ( d.site ? ':' + d.site : '' ); }

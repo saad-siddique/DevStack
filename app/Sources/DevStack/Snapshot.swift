@@ -30,12 +30,21 @@ enum Snapshot {
 		state.setUpdate(nil)
 		var withUpgrades = fixture
 		withUpgrades.upgrades = try? Devstack.decoder.decode(Upgrades.self, from: Data("""
-		{"checked_at":"2026-09-22T03:31:00Z","available":[{"short":"redis","installed":"8.10.2","current":"8.12.0","kind":"minor"}],
+		{"checked_at":"2026-09-22T03:31:00Z","available":[{"short":"redis","installed":"8.10.2","current":"8.12.0","kind":"minor","restarts":"redis"},
+		 {"short":"php@8.3","installed":"8.3.33","current":"8.3.35","kind":"patch","restarts":"php@8.3"},
+		 {"short":"mysql@8.4","installed":"8.4.11_5","current":"8.4.11_6","kind":"patch","rebuild":true,"restarts":"mysql@8.4"},
+		 {"short":"cloudflared","installed":"2026.9.1","current":"2026.9.3","kind":"patch","restarts":""}],
 		 "last_run":{"at":"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600 * 5)))","mode":"auto",
 		 "upgraded":[{"name":"php@8.4","from":"8.4.25","to":"8.4.26"},{"name":"mailpit","from":"1.27.0","to":"1.27.1"}],"restarted":["php@8.4","mailpit"],"failed":[]},"auto":"patch"}
 		""".utf8))
 		state.freeze(with: withUpgrades)
+		let tab = UserDefaults.standard.string(forKey: "panel.tab")
+		UserDefaults.standard.set("Upgrades", forKey: "panel.tab")
 		await capture(PanelView().environmentObject(state), "panel-upgrades", dir)
+		NSApp.appearance = NSAppearance(named: .darkAqua)
+		await capture(PanelView().environmentObject(state), "panel-upgrades-dark", dir)
+		NSApp.appearance = NSAppearance(named: .aqua)
+		UserDefaults.standard.set(tab ?? "Sites", forKey: "panel.tab")
 		state.freeze(with: fixture)
 		state.setBackups([
 			BackupEntry(name: "acme-shop", created: "2026-09-22T03:12:00Z", path: "\(NSHomeDirectory())/Backups/DevStack/acme-shop/20260922-031200", php: "php@8.4", db: "wp_acme_shop", tables: 43, dbDump: "db.sql.gz", files: true, filesArchive: nil, label: nil, sizeBytes: 277_618_688),

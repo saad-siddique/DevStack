@@ -116,9 +116,8 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 **The panel**, top to bottom:
 
 - Header: how many services are online, how many sites, the default PHP version; a refresh button and the ⋯ menu
-  (dashboard, repo and Sites folders, Start at login, update checks, the nightly-upgrade switch, Quit).
-- Notices, when there are any: **Update available** for this repo; the **stack upgrades** line (see *Keeping
-  the stack current* below); a **runaway** line when a stack process has sat above 120% CPU for 90 seconds or holds
+  (dashboard, repo and Sites folders, Start at login, update checks, Quit).
+- Notices, when there are any: **Update available** for this repo; a **runaway** line when a stack process has sat above 120% CPU for 90 seconds or holds
   more than 3 GB, with a Restart button; and a **reports** line when macOS wrote a crash or resource report for a
   stack process in the last 24 hours (Open shows it in Console).
 - macOS notifications (allow them once when asked; mute with *Notifications* in the ⋯ menu): every service start,
@@ -359,7 +358,7 @@ three seconds.
 
 - nginx and PHP errors land in `~/.config/valet/Log/`; the php-fpm master log, Redis and Mailpit in
   `/opt/homebrew/var/log/`; MySQL in `/opt/homebrew/var/mysql/*.err`; each WordPress site in its `wp-content/debug.log`.
-- The dashboard (`https://dashboard.test`) has Overview, PHP, Services, Logs and Tools tabs. It reloads once a minute
+- The dashboard (`https://dashboard.test`) has Overview, PHP, Services, Upgrades, Logs and Tools tabs. It reloads once a minute
   while visible, never while hidden, and has a Refresh button. Its Logs tab tails any log with severity colouring and a
   filter, and the masthead turns red when launchd reports a service in error or macOS wrote a crash report for a stack
   process in the last 24 hours: the failures WordPress itself cannot report.
@@ -404,17 +403,19 @@ Two different things update, and both are prompts by default.
 `com.devstack.upgrade`, runs `devstack upgrade --nightly` at 03:30 (or on the next wake), followed by
 `devstack sizes --refresh`. It runs `brew update`,
 lists the outdated stack formulae and sorts them by version distance: **patch** releases (`x.y.Z`, the security and
-bug-fix line) and **minor/major** releases. By default it changes nothing and only reports. The report shows up in
-the app's panel and on the dashboard's Overview:
+bug-fix line) and **minor/major** releases. By default it changes nothing and only reports. The report lives in
+**Upgrades**: a section of the app's panel (its label shows the count, *Upgrades 4*) and a page in the dashboard's
+sidebar (with the same count). Both show one table:
 
-- *Upgraded today at 03:31: php@8.4 8.4.25 → 8.4.26, mailpit …* after a run that applied something.
-- *N upgrades to review: redis 8.10.2 → 8.12.0* with an **Upgrade all** button.
-- *N patch releases available* with an **Upgrade** button.
+- **Available**: each outdated package, installed → new version, riskiest first. *Major* and *Minor* releases wait
+  for you; *Patch* is bug and security fixes; *Rebuild* is the same version rebuilt by Homebrew against updated
+  libraries. Each row says which service restarts afterwards.
+- **Last run**: what the last upgrade changed (from → to), what failed, and which services were restarted.
+- **Upgrade all** (when minor or major releases wait), **Upgrade now** / **Patches only**, and **Check now**.
 
 ![Stack upgrades in the panel](docs/img/panel-upgrades.png)
 
-If you would rather not wait, tick **Apply patch upgrades nightly** in the app's ⋯ menu (or the checkbox on the
-dashboard). From then on the 03:30 run applies patch releases unattended, restarts the services that changed, and
+If you would rather not wait, tick **Apply patch releases automatically at 03:30** on the Upgrades section or page. From then on the 03:30 run applies patch releases unattended, restarts the services that changed, and
 reports what it did the next morning. Minor and major releases are never applied unattended; they can change
 behaviour, and a `php` formula jump would move PHP 8.5 out from under sites. From the terminal:
 

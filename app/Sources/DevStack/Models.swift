@@ -155,8 +155,12 @@ struct Upgrades: Decodable {
 		let installed: String
 		let current: String
 		let kind: String          // patch | minor | major
+		let rebuild: Bool?        // same upstream version, only Homebrew's _N revision changed
+		let restarts: String?     // the service restarted after the upgrade ("" = none)
 		var id: String { short }
-		var line: String { "\(short) \(installed) → \(current)" }
+		/// What the table shows: rebuild | patch | minor | major, riskiest first.
+		var change: String { rebuild == true ? "rebuild" : kind }
+		var order: Int { ["major": 0, "minor": 1, "patch": 2, "rebuild": 3][change] ?? 2 }
 	}
 	struct Run: Decodable {
 		struct Upgraded: Decodable { let name: String; let from: String; let to: String }
@@ -175,13 +179,7 @@ struct Upgrades: Decodable {
 	var autoEnabled: Bool { (auto ?? "off") != "off" }
 	var patches: [Outdated] { (available ?? []).filter { $0.kind == "patch" } }
 	var review: [Outdated] { (available ?? []).filter { $0.kind != "patch" } }
-	/// A run in the last 24 h that changed something (or failed) is worth a line in the panel.
-	var recentRun: Run? {
-		guard let r = lastRun, let at = r.at, let d = ISO8601DateFormatter().date(from: at), Date().timeIntervalSince(d) < 86_400 else { return nil }
-		if (r.upgraded ?? []).isEmpty && (r.failed ?? []).isEmpty { return nil }
-		return r
-	}
-	var hasNews: Bool { !(available ?? []).isEmpty || recentRun != nil }
+	var sorted: [Outdated] { (available ?? []).sorted { ($0.order, $0.short) < ($1.order, $1.short) } }
 }
 
 /// `devstack logs crashes --json`: macOS crash (.ips) and resource (.diag) reports for stack processes.

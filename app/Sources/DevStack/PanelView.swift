@@ -7,7 +7,7 @@ struct PanelView: View {
 	@AppStorage("panel.tab") private var tab: Tab = .sites
 
 	enum Tab: String, CaseIterable, Identifiable {
-		case sites = "Sites", services = "Services", php = "PHP"
+		case sites = "Sites", services = "Services", php = "PHP", upgrades = "Upgrades"
 		var id: String { rawValue }
 	}
 
@@ -18,9 +18,6 @@ struct PanelView: View {
 			VStack(spacing: 10) {
 				if let msg = state.errorMessage { ErrorLine(message: msg) { state.errorMessage = nil } }
 				if let u = state.update, u.isAvailable { UpdateLine(info: u) { state.runUpdate() } }
-				if let up = state.status?.upgrades, up.hasNews {
-					StackUpgradeLine(upgrades: up, upgradeAll: { state.runUpgrade(all: true) }, upgradePatches: { state.runUpgrade(all: false) })
-				}
 				if !state.runaways.isEmpty {
 					RunawayLine(runaways: state.runaways, restart: { svc in Task { await state.restartService(named: svc) } }, busy: { state.isBusy($0) })
 				}
@@ -30,7 +27,7 @@ struct PanelView: View {
 				Card { quickOpen }
 				Card(padding: 12) { UsageChart(sampler: state.sampler) }
 				Picker("Section", selection: $tab) {
-					ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+					ForEach(Tab.allCases) { Text(label(for: $0)).tag($0) }
 				}
 				.pickerStyle(.segmented).labelsHidden()
 				Card {
@@ -39,6 +36,7 @@ struct PanelView: View {
 						case .sites: SitesView(present: present)
 						case .services: ServicesView()
 						case .php: PhpView()
+						case .upgrades: UpgradesView()
 						}
 					}
 					.frame(height: 292)
@@ -116,10 +114,6 @@ struct PanelView: View {
 				Text("⌃⌥D opens this panel").font(.caption)
 				Button(state.checkingUpdates ? "Checking for updates…" : "Check for updates") { Task { await state.checkForUpdates() } }
 					.disabled(state.checkingUpdates)
-				Button(state.isBusy("upgrade-check") ? "Checking Homebrew…" : "Check Homebrew for stack upgrades") { Task { await state.checkUpgrades() } }
-					.disabled(state.isBusy("upgrade-check"))
-				Toggle("Apply patch upgrades nightly (03:30)", isOn: Binding(get: { state.status?.upgrades?.autoEnabled ?? false }, set: { on in Task { await state.setNightlyUpgrades(on) } }))
-					.disabled(state.isBusy("upgrade-auto") || state.status?.upgrades == nil)
 				Divider()
 				Button("Quit DevStack") { NSApp.terminate(nil) }
 		} label: {
@@ -165,6 +159,12 @@ struct PanelView: View {
 			}
 		}
 		.buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(t.accent)
+	}
+
+	/// "Upgrades 4" while Homebrew has something for the stack, like the dashboard's sidebar count.
+	private func label(for tab: Tab) -> String {
+		let n = state.status?.upgrades?.available?.count ?? 0
+		return tab == .upgrades && n > 0 ? "\(tab.rawValue) \(n)" : tab.rawValue
 	}
 
 	private func present(_ modal: AppState.Modal) {
@@ -430,5 +430,132 @@ struct PhpRow: View {
 				.toggleStyle(.switch).controlSize(.mini).labelsHidden().disabled(busy || php.isDefault)
 				.help(php.isDefault ? "The default version always runs" : (php.fpmRunning ? "Stop php-fpm \(php.version)" : "Start php-fpm \(php.version)"))
 		}
+	}
+}
+
+// MARK: - Upgrades
+
+/// Homebrew releases for the stack (bin/stack-upgrade), the same table as the dashboard's Upgrades page.
+struct UpgradesView: View {
+	@EnvironmentObject private var state: AppState
+	@Environment(\.colorScheme) private var scheme
+
+	var body: some View {
+		let t = Theme(scheme)
+		let up = state.status?.upgrades
+		let avail = up?.sorted ?? []
+		VStack(spacing: 0) {
+			HStack(spacing: 6) {
+				Text(up?.checkedAt.map { "Checked \(when($0))" } ?? "Not checked yet").font(.system(size: 11)).foregroundStyle(t.muted).lineLimit(1)
+				Spacer(minLength: 4)
+				if !(up?.review.isEmpty ?? true) {
+					Button("Upgrade all") { state.runUpgrade(all: true) }.help("brew upgrade everything outdated, then restart what changed")
+				}
+				if !(up?.patches.isEmpty ?? true) {
+					Button((up?.review.isEmpty ?? true) ? "Upgrade now" : "Patches only") { state.runUpgrade(all: false) }.help("brew upgrade the patch releases, then restart what changed")
+				}
+				Button { Task { await state.checkUpgrades() } } label: { Image(systemName: "arrow.clockwise") }
+					.help("Check Homebrew now").disabled(state.isBusy("upgrade-check"))
+			}
+			.controlSize(.small)
+			.padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+			Toggle("Apply patch releases automatically at 03:30", isOn: Binding(get: { up?.autoEnabled ?? false }, set: { on in Task { await state.setNightlyUpgrades(on) } }))
+				.toggleStyle(.checkbox).controlSize(.small).font(.system(size: 11)).foregroundStyle(t.muted)
+				.disabled(state.isBusy("upgrade-auto") || up == nil)
+				.help("Minor and major releases always wait for you")
+				.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 8)
+				.overlay(alignment: .bottom) { Rectangle().fill(t.divider).frame(height: 1) }
+			ScrollView {
+				LazyVStack(spacing: 0) {
+					if avail.isEmpty {
+						Text("The stack is up to date.").font(.system(size: 12)).foregroundStyle(t.muted)
+							.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+					}
+					ForEach(avail) { a in
+						VersionRow(name: a.short, note: (a.restarts ?? "").isEmpty ? "no restart" : "restarts \(a.restarts!)", from: a.installed, to: a.current) {
+							ChangeBadge(change: a.change)
+						}
+					}
+					if let run = up?.lastRun, let at = run.at {
+						Text("Last run  \(when(at)), \(run.mode == "all" ? "everything outdated" : "patch releases")")
+							.font(.system(size: 11, weight: .semibold)).foregroundStyle(t.muted)
+							.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 2)
+						ForEach(run.upgraded ?? [], id: \.name) { x in
+							VersionRow(name: x.name, note: nil, from: x.from, to: x.to) {
+								Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(t.ok).help("Upgraded")
+							}
+						}
+						ForEach(run.failed ?? [], id: \.name) { x in
+							VersionRow(name: x.name, note: x.error, from: nil, to: nil) {
+								Image(systemName: "xmark.octagon.fill").font(.system(size: 12)).foregroundStyle(t.bad).help(x.error ?? "Failed")
+							}
+						}
+						let restarted = run.restarted ?? []
+						Text(restarted.isEmpty ? "No running service needed a restart." : "Restarted \(restarted.joined(separator: ", ")).")
+							.font(.system(size: 10.5)).foregroundStyle(t.faint)
+							.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 6)
+					}
+				}
+			}
+		}
+	}
+
+	private func when(_ iso: String) -> String {
+		guard let d = ISO8601DateFormatter().date(from: iso) else { return iso }
+		return d.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+	}
+}
+
+/// One package: name (and what restarts) on the left, installed → new version, then a badge or result mark.
+struct VersionRow<Trailing: View>: View {
+	@Environment(\.colorScheme) private var scheme
+	let name: String
+	let note: String?
+	let from: String?
+	let to: String?
+	@ViewBuilder var trailing: Trailing
+
+	var body: some View {
+		let t = Theme(scheme)
+		HStack(spacing: 8) {
+			VStack(alignment: .leading, spacing: 1) {
+				Text(name).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(t.text).lineLimit(1)
+				if let note { Text(note).font(.system(size: 10.5)).foregroundStyle(t.faint).lineLimit(1) }
+			}
+			.frame(width: 118, alignment: .leading)
+			if let from, let to {
+				HStack(spacing: 5) {
+					Text(from).foregroundStyle(t.muted).frame(width: 58, alignment: .leading)
+					Image(systemName: "arrow.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(t.faint)
+					Text(to).fontWeight(.semibold).foregroundStyle(t.text)
+				}
+				.font(.system(size: 12)).monospacedDigit().lineLimit(1)
+			}
+			Spacer(minLength: 6)
+			trailing
+		}
+		.padding(.horizontal, 12).padding(.vertical, 7)
+		.overlay(alignment: .bottom) { Rectangle().fill(t.divider).frame(height: 1).padding(.leading, 12) }
+	}
+}
+
+/// Rebuild / Patch / Minor / Major, coloured by risk like the dashboard.
+struct ChangeBadge: View {
+	@Environment(\.colorScheme) private var scheme
+	let change: String
+
+	var body: some View {
+		let t = Theme(scheme)
+		let (fg, bg, help): (Color, Color, String) = {
+			switch change {
+			case "major": return (t.badTileText, t.badTile, "New major version: breaking changes are possible. Review before upgrading.")
+			case "minor": return (t.warnTileText, t.warnTile, "New features. Review before upgrading.")
+			case "rebuild": return (t.muted, t.divider, "Same version, rebuilt by Homebrew against updated libraries.")
+			default: return (t.tileText, t.tile, "Bug and security fixes.")
+			}
+		}()
+		Text(change.capitalized).font(.system(size: 10, weight: .semibold))
+			.padding(.horizontal, 7).padding(.vertical, 2)
+			.background(Capsule().fill(bg)).foregroundStyle(fg).help(help)
 	}
 }

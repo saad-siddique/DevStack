@@ -232,6 +232,7 @@ header( 'Cache-Control: no-store' );
 			<button class="nav-item" role="tab" data-tab="overview" aria-selected="true" aria-controls="tab-overview">Overview<span class="dot" hidden></span></button>
 			<button class="nav-item" role="tab" data-tab="php" aria-selected="false" aria-controls="tab-php">PHP<span class="dot" hidden></span></button>
 			<button class="nav-item" role="tab" data-tab="services" aria-selected="false" aria-controls="tab-services">Services<span class="dot" hidden></span></button>
+			<button class="nav-item" role="tab" data-tab="upgrades" aria-selected="false" aria-controls="tab-upgrades">Upgrades<span class="n" id="upg-count" hidden></span><span class="dot" hidden></span></button>
 			<button class="nav-item" role="tab" data-tab="logs" aria-selected="false" aria-controls="tab-logs">Logs<span class="dot" hidden></span></button>
 			<button class="nav-item" role="tab" data-tab="tools" aria-selected="false" aria-controls="tab-tools">Tools<span class="dot" hidden></span></button>
 		</nav>
@@ -252,7 +253,6 @@ header( 'Cache-Control: no-store' );
 				<div class="quick" id="quick" aria-label="Quick open"></div>
 			</header>
 			<div class="upgrades share" id="share" hidden role="status"></div>
-			<div class="upgrades" id="upgrades" hidden role="status"></div>
 			<ul class="strip" id="strip" aria-label="Service status"></ul>
 			<div class="panel-head">
 				<h3>Sites <span class="count" id="sites-count"></span></h3>
@@ -285,6 +285,19 @@ header( 'Cache-Control: no-store' );
 			</header>
 			<ul class="switchboard" id="services"></ul>
 			<p class="ports" id="ports"></p>
+		</section>
+
+		<section class="tab" id="tab-upgrades" role="tabpanel" data-tab="upgrades" hidden>
+			<header class="tab-head">
+				<h2>Upgrades</h2>
+				<p class="hint" id="upg-checked"></p>
+				<div class="quick" id="upg-actions"></div>
+			</header>
+			<label class="upg-auto"><input type="checkbox" id="upg-auto"> Apply patch releases automatically at 03:30. Minor and major releases always wait for you.</label>
+			<div class="panel-head"><h3>Available <span class="count" id="upg-avail-count"></span></h3></div>
+			<div id="upg-available"></div>
+			<div class="panel-head"><h3>Last run <span class="count" id="upg-run-meta"></span></h3></div>
+			<div id="upg-run"></div>
 		</section>
 
 		<section class="tab" id="tab-logs" role="tabpanel" data-tab="logs" hidden>

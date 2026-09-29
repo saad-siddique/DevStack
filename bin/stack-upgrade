@@ -46,18 +46,6 @@ kind() {
 	if [ "$a1" != "$b1" ]; then echo major; elif [ "$a2" != "$b2" ]; then echo minor; else echo patch; fi
 }
 
-log "brew update"
-"$BREW_PREFIX/bin/brew" update -q > /dev/null 2>&1 || log "warning: brew update failed (offline?), classifying against the local tap state"
-available="$("$BREW_PREFIX/bin/brew" outdated --json=v2 --formula 2> /dev/null | jq -c '.formulae[] | {name, installed: .installed_versions[-1], current: .current_version, pinned}' \
-	| while IFS= read -r row; do
-		full="$(jq -r .name <<<"$row")"; short="${full##*/}"
-		ours_has "$short" || continue
-		inst="$(jq -r .installed <<<"$row")"; cur="$(jq -r .current <<<"$row")"
-		jq -c --arg short "$short" --arg kind "$(kind "$inst" "$cur")" '. + {short:$short, kind:$kind}' <<<"$row"
-	done | jq -s '.')"
-n_avail="$(jq length <<<"$available")"
-log "outdated stack formulae: $n_avail"
-
 # service_for <short formula> : which stack service must restart after this upgrade (empty = none).
 service_for() {
 	case "$1" in
@@ -69,8 +57,27 @@ service_for() {
 }
 is_running() {
 	{ sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; } \
-		| jq -e --arg n "$1" 'add | map(select(.name == $n and .status == "started")) | length > 0' > /dev/null 2>&1
+		| jq -s -e --arg n "$1" 'add | map(select(.name == $n and .status == "started")) | length > 0' > /dev/null 2>&1
 }
+
+# outdated : our outdated formulae as a JSON array. rebuild = same upstream version, only Homebrew's _N revision
+# changed (rebuilt against new dependencies); restarts = the service restarted after the upgrade.
+outdated() {
+	"$BREW_PREFIX/bin/brew" outdated --json=v2 --formula 2> /dev/null | jq -c '.formulae[] | {name, installed: .installed_versions[-1], current: .current_version, pinned}' \
+		| while IFS= read -r row; do
+			full="$(jq -r .name <<<"$row")"; short="${full##*/}"
+			ours_has "$short" || continue
+			inst="$(jq -r .installed <<<"$row")"; cur="$(jq -r .current <<<"$row")"
+			rebuild=false; [ "${inst%%_*}" = "${cur%%_*}" ] && rebuild=true
+			jq -c --arg short "$short" --arg kind "$(kind "$inst" "$cur")" --argjson rebuild "$rebuild" --arg restarts "$(service_for "$short")" \
+				'. + {short:$short, kind:$kind, rebuild:$rebuild, restarts:$restarts}' <<<"$row"
+		done | jq -s '.'
+}
+
+log "brew update"
+"$BREW_PREFIX/bin/brew" update -q > /dev/null 2>&1 || log "warning: brew update failed (offline?), classifying against the local tap state"
+available="$(outdated)" || available='[]'
+log "outdated stack formulae: $(jq length <<<"$available")"
 
 last_run=null
 if [ "check" != "$MODE" ]; then
@@ -80,7 +87,8 @@ if [ "check" != "$MODE" ]; then
 		[ -n "$row" ] || continue
 		full="$(jq -r .name <<<"$row")"; short="$(jq -r .short <<<"$row")"; from="$(jq -r .installed <<<"$row")"; to="$(jq -r .current <<<"$row")"
 		log "brew upgrade $full ($from -> $to)"
-		if "$BREW_PREFIX/bin/brew" upgrade "$full" > /dev/null 2> >(tail -3 >&2); then
+		# < /dev/null: brew (mysql's post-install, for one) reads stdin and would swallow the rest of this list.
+		if "$BREW_PREFIX/bin/brew" upgrade "$full" < /dev/null > /dev/null 2> >(tail -3 >&2); then
 			upgraded="$(jq -c --arg n "$short" --arg f "$from" --arg t "$to" '. + [{name:$n,from:$f,to:$t}]' <<<"$upgraded")"
 			svc="$(service_for "$short")"; [ -n "$svc" ] && restart+=("$svc")
 		else
@@ -105,12 +113,7 @@ if [ "check" != "$MODE" ]; then
 	last_run="$(jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg mode "$MODE" --argjson up "$upgraded" --argjson rs "$restarted" --argjson f "$failed" \
 		'{at:$at,mode:$mode,upgraded:$up,restarted:$rs,failed:$f}')"
 	# What is still outdated after applying.
-	available="$("$BREW_PREFIX/bin/brew" outdated --json=v2 --formula 2> /dev/null | jq -c '.formulae[] | {name, installed: .installed_versions[-1], current: .current_version, pinned}' \
-		| while IFS= read -r row; do
-			full="$(jq -r .name <<<"$row")"; short="${full##*/}"; ours_has "$short" || continue
-			inst="$(jq -r .installed <<<"$row")"; cur="$(jq -r .current <<<"$row")"
-			jq -c --arg short "$short" --arg kind "$(kind "$inst" "$cur")" '. + {short:$short, kind:$kind}' <<<"$row"
-		done | jq -s '.' || echo '[]')"
+	available="$(outdated)" || available='[]'
 	log "upgraded $(jq length <<<"$upgraded"), failed $(jq length <<<"$failed"), still outdated $(jq length <<<"$available")"
 fi
 
