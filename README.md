@@ -425,6 +425,7 @@ devstack upgrade --auto             # apply patch releases now, restart what cha
 devstack upgrade --all              # apply everything outdated, restart what changed
 devstack upgrade --set-auto patch   # let the nightly run apply patch releases (off | patch | all)
 devstack logs upgrade               # what the nightly run did
+devstack php-repair 8.6             # reinstall PHP 8.6 + its extensions when some fail to load
 ```
 
 **This repo (scripts, dashboard, app).** See below.
@@ -467,7 +468,7 @@ drivers/              LocalValetDriver for subdirectory multisites
 mu-plugins/           uo-local-ssl.php (trust the local CA), uo-local-autologin.php (one-time login); .test hosts only
 dashboard/            dashboard.test (PHP + a little JS)
 bin/                  THE CONTRACT — devstack (dispatcher)  site-new  site-import  site-backup  site-login  site-remove
-                      php-xdebug  service  stack-status  stack-upgrade  update  logs  logs-prune  migrate-site  migrate-all
+                      php-xdebug  php-repair  service  stack-status  stack-upgrade  update  logs  logs-prune  migrate-site  migrate-all
                       mamp-backout  app
 completions/          zsh completion for devstack
 app/                  DevStack.app: SwiftUI MenuBarExtra + Swift Charts, Swift Package; only ever runs `devstack …`
@@ -484,6 +485,14 @@ docs/                 migrating-from-mamp.md, screenshots (docs/img); docs/priva
 
 ## Things learned the hard way
 
+- Pre-release PHP (8.6) is rebuilt by its tap without a version bump, so an upgraded extension can target a newer
+  PHP build than the one installed ("Unable to initialize module ... module API=2026…"). After every upgrade,
+  `stack-upgrade` checks each touched PHP and runs `php-repair`, which reinstalls that PHP and all its extensions
+  from the current bottles. The PHP page shows a **Repair** button, and `doctor` flags it.
+- Valet runs php-fpm, nginx and dnsmasq as root, and `brew services` then makes their `bin/` root-owned. After an
+  upgrade `brew cleanup` cannot delete the old build (about 100 MB each); `doctor` lists them with the `sudo rm -rf`
+  line to run.
+- `brew upgrade` reads stdin. Inside a `while read` loop it swallowed the rest of the list; give it `< /dev/null`.
 - A Mac migrated from Intel with Migration Assistant, or a Terminal with "Open using Rosetta" ticked, reports
   `x86_64` on an M-series chip and carries an Intel Homebrew in `/usr/local`. Homebrew then says "Tier 3", has no
   bottles, and builds PHP from source until the missing Command Line Tools make it fail. Bootstrap checks

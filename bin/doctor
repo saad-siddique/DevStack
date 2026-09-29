@@ -44,6 +44,8 @@ for d in "$BREW_PREFIX"/etc/php/*/; do
 	elif [ "started" = "$st" ] && [ ! -S "$VALET_HOME/valet${v/./}.sock" ]; then add fail "php-fpm $v" "running but no socket valet${v/./}.sock" "devstack service php@$v restart; devstack logs php-fpm"
 	elif [ "started" = "$st" ]; then add ok "php-fpm $v" "running, $([ default = "$used" ] && echo default || echo "$used isolated sites")"
 	else add ok "php-fpm $v" "off (no sites)"; fi
+	broken="$(php_broken_ext "$BREW_PREFIX/opt/$formula/bin/php" | paste -sd' ' -)"
+	[ -z "$broken" ] || add fail "php $v extensions" "$broken fail to load (built against another PHP $v build)" "devstack php-repair $v" "$REPO_DIR/bin/php-repair $v"
 	[ -f "$d/conf.d/zz-uo-dev.ini" ] || add warn "php $v ini" "zz-uo-dev.ini drop-in missing" "./bootstrap.sh" "$(auto_boot)"
 	[ -f "$d/php-fpm.d/zz-devstack.conf" ] || add warn "php $v pool" "pool guard drop-in missing (5 workers, no request timeout)" "./bootstrap.sh" "$(auto_boot)"
 done
@@ -74,6 +76,13 @@ sudo -n -l "$VALET_BIN" > /dev/null 2>&1 && add ok "sudoers" "valet + brew trust
 [ "$(readlink "$BREW_PREFIX/bin/devstack" 2> /dev/null)" = "$REPO_DIR/bin/devstack" ] && add ok "devstack link" "$BREW_PREFIX/bin/devstack -> this repo" || add warn "devstack link" "points elsewhere or missing" "./bootstrap.sh" "$(auto_boot)"
 for a in logs-prune upgrade watchdog; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh" "$(auto_boot)"; done
 free_gb="$(df -g "$HOME" | awk 'NR==2{print $4}')"
+# Valet runs php-fpm, nginx and dnsmasq as root, and brew services then makes their bin/ root-owned; brew cleanup
+# cannot delete those old builds after an upgrade without sudo.
+stale="$(HOMEBREW_NO_AUTO_UPDATE=1 "$BREW_PREFIX/bin/brew" cleanup -n 2> /dev/null | sed -nE "s#^Would remove: ($BREW_PREFIX/Cellar/[^ ]+) .*#\\1#p" \
+	| while IFS= read -r k; do [ -n "$(find "$k" -maxdepth 1 -user root 2> /dev/null)" ] && echo "$k"; done || true)"
+if [ -n "$stale" ]; then
+	add warn "old builds" "$(wc -l <<<"$stale" | tr -d ' ') old PHP/nginx build(s), $(du -sch $stale 2> /dev/null | tail -1 | cut -f1), are root-owned so brew cleanup skips them" "sudo rm -rf $(paste -sd' ' - <<<"$stale")"
+fi
 [ "${free_gb:-0}" -ge 10 ] && add ok "disk" "${free_gb} GB free" || add warn "disk" "only ${free_gb} GB free" "devstack backups (delete old ones), brew cleanup, devstack logs-prune"
 bk="$(du -sk "$HOME/Backups/DevStack" 2> /dev/null | cut -f1 || true)"; [ "${bk:-0}" -gt $((20*1024*1024)) ] && add warn "backups" "$((bk/1024/1024)) GB in ~/Backups/DevStack" "delete backups you no longer need"
 [ -f "$HOME/Sites/wp-config.php" ] && add fail "stray wp-config" "~/Sites/wp-config.php breaks wp config create for every site" "move it out of ~/Sites"

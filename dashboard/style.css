@@ -73,6 +73,7 @@ a.act:hover { text-decoration: none; }
 .lamp.on { background: var(--on); box-shadow: 0 0 0 4px var(--on-glow); }
 .svc-name { font-weight: 600; line-height: 1.2; }
 .svc-state { display: block; color: var(--muted); font-size: 12.5px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.svc-state.bad { color: var(--danger); font-weight: 600; }
 .actions { display: flex; gap: 4px; flex: none; }
 button.act, a.act {
 	font: inherit; font-size: 12.5px; line-height: 1; padding: 6px 9px; border-radius: 7px; cursor: pointer;

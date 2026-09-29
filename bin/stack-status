@@ -16,14 +16,16 @@ php_json="$(for d in "$BREW_PREFIX"/etc/php/*/; do
 	[ -d "$d/conf.d" ] || continue
 	v="$(basename "$d")"; sock="valet${v/./}.sock"
 	formula="php@$v"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"
-	full="$("$BREW_PREFIX/opt/$formula/bin/php" -r 'echo PHP_VERSION;' 2> /dev/null || true)"
+	# Startup warnings go to stdout, so the version is the last line; broken_ext names what failed to load.
+	full="$("$BREW_PREFIX/opt/$formula/bin/php" -r 'echo "\n", PHP_VERSION;' 2> /dev/null | tail -1 || true)"
+	broken="$(php_broken_ext "$BREW_PREFIX/opt/$formula/bin/php" | paste -sd, -)"
 	is_default=false; [ "$sock" = "$default_sock" ] && is_default=true
 	iso="$(/usr/bin/grep -l "$sock" "$VALET_HOME"/Nginx/* 2> /dev/null | wc -l | tr -d ' ')"
 	if [ "true" = "$is_default" ]; then sites=$(( n_linked - n_isolated_total )); else sites="$iso"; fi
 	xd=false; [ -f "$d/conf.d/20-xdebug.ini" ] && xd=true
 	fpm="$(echo "$services" | jq -r --arg f "$formula" '.[] | select(.name == $f) | .status' | head -1)"
-	jq -n --arg v "$v" --arg full "$full" --arg formula "$formula" --arg fpm "${fpm:-none}" --argjson default "$is_default" --argjson sites "$sites" --argjson xdebug "$xd" \
-		'{version:$v,full:$full,formula:$formula,fpm:$fpm,default:$default,sites:$sites,xdebug:$xdebug}'
+	jq -n --arg v "$v" --arg full "$full" --arg formula "$formula" --arg fpm "${fpm:-none}" --argjson default "$is_default" --argjson sites "$sites" --argjson xdebug "$xd" --arg broken "$broken" \
+		'{version:$v,full:$full,formula:$formula,fpm:$fpm,default:$default,sites:$sites,xdebug:$xdebug,broken_ext:($broken | split(",") | map(select(. != "")))}'
 done | jq -s 'sort_by(.version)')"
 
 today="$(date '+%d-%b-%Y')"; yday="$(date -v-1d '+%d-%b-%Y')"

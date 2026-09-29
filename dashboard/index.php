@@ -6,6 +6,7 @@
  * GET  /?api=status    bin/stack-status + Xdebug state + tool links.
  * POST /?api=service   name=<service> op=start|stop|restart   -> bin/service
  * POST /?api=xdebug    php=8.4|7.4  op=on|off                  -> bin/php-xdebug
+ * POST /?api=php-repair php=8.6                              -> bin/php-repair (extensions that fail to load)
  *
  * Writes need the request header X-Devstack: 1. A page on another origin cannot add that header without a
  * CORS preflight, which this endpoint never answers, so a stray tab cannot stop your services.
@@ -202,6 +203,17 @@ if ( '' !== $api ) {
 		}
 		list( $code, $out, $err ) = devstack_run( array( $repo_bin . '/php-xdebug', $op, '--php', $php, '--json' ), $home );
 		devstack_json( 0 === $code ? 200 : 500, json_decode( $out, true ) ?: array( 'error' => trim( $err ) ?: 'php-xdebug failed' ) );
+	}
+
+	if ( 'php-repair' === $api && $is_write ) {
+		set_time_limit( 900 );   // brew reinstall of PHP and its extensions
+		$php          = (string) ( $_POST['php'] ?? '' );
+		$php_versions = array_map( static function ( $d ) { return basename( dirname( $d ) ); }, glob( DEVSTACK_BREW . '/etc/php/*/conf.d', GLOB_ONLYDIR ) ?: array() );
+		if ( ! in_array( $php, $php_versions, true ) ) {
+			devstack_json( 400, array( 'error' => 'Unknown PHP version.' ) );
+		}
+		list( $code, , $err ) = devstack_run( array( $repo_bin . '/php-repair', $php ), $home );
+		devstack_json( 0 === $code ? 200 : 500, 0 === $code ? array( 'ok' => true ) : array( 'error' => trim( $err ) ?: 'php-repair failed' ) );
 	}
 
 	devstack_json( 404, array( 'error' => 'Unknown api.' ) );

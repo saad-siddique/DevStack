@@ -72,6 +72,17 @@ php_bin() {
 	printf '%s/opt/%s/bin/php\n' "$BREW_PREFIX" "$1"
 }
 
+# php_broken_ext <php binary> : extensions that fail to load at startup, one per line. Usually a module API mismatch
+# after Homebrew rebuilt PHP or the extension on its own; bin/php-repair fixes that.
+php_broken_ext() {
+	"$1" -v 2>&1 | sed -nE \
+		-e 's/.*PHP Startup: ([A-Za-z0-9_]+): Unable to initialize module.*/\1/p' \
+		-e 's/.*Cannot load module "([A-Za-z0-9_]+)".*/\1/p' \
+		-e 's/^([A-Za-z]+) requires Zend Engine API version.*/\1/p' \
+		-e "s/.*Unable to load dynamic library '([^']*\\/)?([A-Za-z0-9_]+)(\\.so)?'.*/\\2/p" \
+		| tr '[:upper:]' '[:lower:]' | sort -u || true
+}
+
 # wp_site <php formula> <site path> <wp args...> : WP-CLI under the site's PHP, core only (mu-plugins still load).
 # WP-CLI resets error_reporting itself, so on PHP 8.5/8.6 its own deprecations reach stdout; strip those lines
 # (never data) and keep WP-CLI's exit status.

@@ -87,7 +87,7 @@ enum Snapshot {
 		}
 		func svc(_ n: String, _ u: String) -> Service { Service(name: n, status: "started", user: u) }
 		func php(_ v: String, _ full: String, fpm: Bool, def: Bool = false, sites: Int = 0) -> PhpVersion {
-			PhpVersion(version: v, full: full, formula: v == "8.5" ? "php" : "php@\(v)", fpm: fpm ? "started" : "none", isDefault: def, sites: sites, xdebug: false)
+			PhpVersion(version: v, full: full, formula: v == "8.5" ? "php" : "php@\(v)", fpm: fpm ? "started" : "none", isDefault: def, sites: sites, xdebug: false, brokenExt: nil)
 		}
 		return StackStatus(
 			generatedAt: "2026-09-22T12:00:00Z",

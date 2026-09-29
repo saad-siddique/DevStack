@@ -13,7 +13,7 @@ _devstack() {
 		'new:fresh WordPress site' 'import:import a LocalWP export, folder or backup' 'backup:back up a site'
 		'backups:list or prune backups' 'archive:back up then remove a site' 'restore:recreate a site from its backup' 'clone:copy a site under a new name' 'remove:remove a site' 'watchdog:restart nginx/dnsmasq if lost' 'sizes:folder size per site' 'favorite:pin a site to the top' 'cache:object cache per site' 'share:public URL through Cloudflare' 'sites:list linked sites' 'login:open wp-admin signed in' 'php:switch a site PHP version' 'doctor:check the stack' 'uninstall:remove DevStack from this Mac' 'open:open a site or tool in the browser'
 		'migrate:migrate one MAMP host' 'migrate-all:migrate every non-protected host'
-		'status:stack status JSON' 'service:start/stop/restart a service' 'xdebug:toggle Xdebug per PHP version'
+		'status:stack status JSON' 'service:start/stop/restart a service' 'xdebug:toggle Xdebug per PHP version' 'php-repair:reinstall a PHP version whose extensions fail to load'
 		'logs:tail stack logs' 'logs-prune:rotate logs now'
 		'bootstrap:(re)install the stack' 'update:git pull + bootstrap' 'upgrade:Homebrew upgrades of the stack' 'app:menu-bar app' 'path:print repo dir' 'help:usage'
 	)
@@ -33,6 +33,7 @@ _devstack() {
 			if (( CURRENT == 3 )); then
 				local -a s; s=( nginx dnsmasq mysql@8.4 mailpit redis memcached ${(f)"$(ls "$(_devstack_php_dir)" 2> /dev/null | sed 's/^/php@/')"} ); _describe 'service' s
 			else local -a o; o=( start stop restart status ); _describe 'operation' o; fi ;;
+		php-repair) _devstack_php ;;
 		xdebug) (( CURRENT == 3 )) && { local -a o; o=( on off status ); _describe 'operation' o; } || _arguments '--php[PHP version]:version:_devstack_php' '--json' ;;
 		logs) local -a src; src=( list nginx php php-fpm mysql redis mailpit prune wp crashes clear ); (( CURRENT == 3 )) && _describe 'source' src || _devstack_sites ;;
 		app) local -a a; a=( build install open uninstall status ); _describe 'action' a ;;

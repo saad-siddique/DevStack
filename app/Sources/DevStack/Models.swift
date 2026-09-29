@@ -95,7 +95,8 @@ struct PhpVersion: Decodable, Identifiable, Equatable {
 	let isDefault: Bool
 	let sites: Int
 	let xdebug: Bool
-	enum CodingKeys: String, CodingKey { case version, full, formula, fpm, sites, xdebug, isDefault = "default" }
+	let brokenExt: [String]?     // extensions that fail to load (bin/php-repair)
+	enum CodingKeys: String, CodingKey { case version, full, formula, fpm, sites, xdebug, brokenExt, isDefault = "default" }
 	var id: String { version }
 	var fpmRunning: Bool { fpm == "started" }
 }

@@ -35,7 +35,8 @@ version() { git -C "$REPO_DIR" describe --tags --always --dirty 2> /dev/null || 
 build() {
 	xcode-select -p > /dev/null 2>&1 || die "Xcode Command Line Tools missing: xcode-select --install"
 	log "swift build -c release ($(swift --version 2>&1 | head -1 | sed -E 's/.*Swift version ([0-9.]+).*/Swift \1/'))"
-	( cd "$APP_SRC" && swift build -c release 2>&1 | grep -vE 'ld: warning: search path' | tail -3 >&2 )
+	# Compiler errors, not just the last lines (colour codes stripped).
+	( cd "$APP_SRC" && swift build -c release 2>&1 | sed -E $'s/\x1b\\[[0-9;]*m//g' | grep -E ': error:|^error:|Build complete' | tail -12 >&2 )
 	local bin; bin="$(cd "$APP_SRC" && swift build -c release --show-bin-path)/DevStack"
 	[ -x "$bin" ] || die "build produced no binary"
 

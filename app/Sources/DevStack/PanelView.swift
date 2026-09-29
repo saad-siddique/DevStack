@@ -410,7 +410,10 @@ struct PhpRow: View {
 	@EnvironmentObject private var state: AppState
 	let php: PhpVersion
 
+	private var broken: [String] { php.brokenExt ?? [] }
+
 	private var subtitle: String {
+		if !broken.isEmpty { return "\(broken.joined(separator: ", ")) \(broken.count == 1 ? "fails" : "fail") to load" }
 		var parts: [String] = [php.full]
 		if php.isDefault { parts.append("default") }
 		parts.append(php.sites == 1 ? "1 site" : "\(php.sites) sites")
@@ -421,8 +424,12 @@ struct PhpRow: View {
 	var body: some View {
 		let busy = state.isBusy("php@\(php.version)")
 		Row(title: "PHP \(php.version)", subtitle: subtitle) {
-			StatusDot(kind: busy ? .busy : (php.fpmRunning ? .on : .off))
+			StatusDot(kind: busy ? .busy : (!broken.isEmpty ? .error : (php.fpmRunning ? .on : .off)))
 		} trailing: {
+			if !broken.isEmpty {
+				Button("Repair") { state.repairPhp(php.version) }.controlSize(.small).disabled(busy)
+					.help("Homebrew built these against another PHP \(php.version) build. Reinstalls PHP \(php.version) and its extensions.")
+			}
 			Toggle("Xdebug", isOn: Binding(get: { php.xdebug }, set: { _ in Task { await state.toggleXdebug(php) } }))
 				.toggleStyle(.checkbox).controlSize(.small).disabled(busy)
 				.help("Xdebug in trigger mode on port 9003 (restarts php-fpm \(php.version))")

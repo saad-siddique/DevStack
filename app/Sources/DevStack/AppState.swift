@@ -322,7 +322,9 @@ final class AppState: ObservableObject {
 
 	/// Homebrew upgrades of the stack. --all applies minor/major releases too; the nightly agent only does patches.
 	func runUpgrade(all: Bool) { runJob(title: all ? "Upgrade stack (everything outdated)" : "Upgrade stack (patch releases)", ["upgrade", all ? "--all" : "--auto", "--json"]) }
-	func checkUpgrades() async { await quick("upgrade-check", ["upgrade", "--check", "--json"]) }
+	/// Reinstalls PHP X.Y and its extensions when some fail to load (module API mismatch after a Homebrew rebuild).
+	func repairPhp(_ version: String) { runJob(title: "Repair PHP \(version) extensions", ["php-repair", version]) }
+		func checkUpgrades() async { await quick("upgrade-check", ["upgrade", "--check", "--json"]) }
 	/// The developer's choice for the 03:30 run: report only (off) or apply patch releases unattended.
 	func setNightlyUpgrades(_ on: Bool) async { await quick("upgrade-auto", ["upgrade", "--set-auto", on ? "patch" : "off", "--json"]) }
 

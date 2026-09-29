@@ -98,7 +98,12 @@
 			else if ( p.sites > 0 ) { state = p.sites + ( 1 === p.sites ? ' site' : ' sites' ) + ( running ? '' : ', php-fpm stopped' ); }
 			else { state = running ? 'php-fpm running, no sites' : 'idle, php-fpm stopped'; }
 			if ( p.xdebug ) { state += ', Xdebug on'; }
+			var broken = p.broken_ext || [];
+			if ( broken.length ) { state = broken.join( ', ' ) + ( 1 === broken.length ? ' fails' : ' fail' ) + ' to load'; }
 			var actions = el( 'span', { 'class': 'actions' } );
+			if ( broken.length ) {
+				actions.appendChild( button( 'Repair', 'primary', function () { return post( 'php-repair', { php: p.version } ); } ) );
+			}
 			actions.appendChild( button( p.xdebug ? 'Xdebug off' : 'Xdebug on', p.xdebug ? 'quiet' : '', function () { return post( 'xdebug', { php: p.version, op: p.xdebug ? 'off' : 'on' } ); } ) );
 			if ( running ) {
 				actions.appendChild( button( 'Restart', '', function () { return post( 'service', { name: svcName, op: 'restart' } ); } ) );
@@ -108,7 +113,7 @@
 			}
 			list.appendChild( el( 'li', { 'class': 'svc' + ( p['default'] ? ' is-default' : '' ) }, [
 				el( 'span', { 'class': 'lamp' + ( running ? ' on' : '' ), 'aria-hidden': 'true' } ),
-				el( 'span', { 'class': 'svc-name', text: 'PHP ' + ( p.full || p.version ) }, [ el( 'span', { 'class': 'svc-state', text: state } ) ] ),
+				el( 'span', { 'class': 'svc-name', text: 'PHP ' + ( p.full || p.version ) }, [ el( 'span', { 'class': 'svc-state' + ( broken.length ? ' bad' : '' ), title: broken.length ? 'Homebrew built these against another PHP ' + p.version + ' build. Repair reinstalls PHP ' + p.version + ' and its extensions.' : state, text: state } ) ] ),
 				actions
 			] ) );
 		} );

@@ -100,6 +100,13 @@ if [ "check" != "$MODE" ]; then
 		"$BREW_PREFIX/bin/brew" link --force --overwrite "$DEFAULT_PHP" > /dev/null 2>&1 || true
 		for d in "$BREW_PREFIX"/etc/php/*/conf.d; do sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" | cmp -s - "$d/zz-uo-dev.ini" || sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" > "$d/zz-uo-dev.ini"; done
 	fi
+	# A PHP or extension bottle built against another module API leaves extensions that fail to load (pre-release
+	# PHP 8.6 does this); php-repair reinstalls that PHP and its extensions together.
+	for svc in $(printf '%s\n' "${restart[@]+"${restart[@]}"}" | grep '^php@' | sort -u || true); do
+		php_broken_ext "$(php_bin "$svc")" | grep -q . || continue
+		"$REPO_DIR/bin/php-repair" "${svc#php@}" \
+			|| failed="$(jq -c --arg n "$svc" --arg e "extensions fail to load: devstack php-repair ${svc#php@}" '. + [{name:$n,error:$e}]' <<<"$failed")"
+	done
 	restarted='[]'
 	for svc in $(printf '%s\n' "${restart[@]+"${restart[@]}"}" | sort -u); do
 		[ -n "$svc" ] || continue
