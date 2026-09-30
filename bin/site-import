@@ -68,7 +68,7 @@ if [ -z "$DB_USER" ] || [ "root" = "$DB_USER" ]; then DB_USER="$DB_NAME"; DB_PAS
 mysql_new -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
 db_ensure_user "$DB_NAME" "$DB_USER" "$DB_PASS"
 # LocalWP dumps may carry CREATE DATABASE/USE for their own schema name; strip so everything lands in $DB_NAME.
-read_sql | sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$DB_NAME"
+read_sql | LC_ALL=C sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$DB_NAME"
 n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$DB_NAME' AND TABLE_TYPE='BASE TABLE'")"
 [ "$n_tables" -gt 0 ] || die "import produced no tables"
 log "db: $DB_NAME ($n_tables tables), user $DB_USER"

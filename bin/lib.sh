@@ -105,7 +105,7 @@ sql_quote() { printf '%s' "$1" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g"; }
 db_ensure_user() {
 	local d u p
 	d="$(printf '%s' "$1" | sed 's/`/``/g')"; u="$(sql_quote "$2")"; p="$(sql_quote "$3")"
-	mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
+	mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; ALTER USER '$u'@'localhost', '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
 }
 
 # db_name_for <site> : wp_<site> with dashes as underscores (MySQL-safe, readable in phpMyAdmin).
@@ -114,7 +114,7 @@ db_name_for() { printf 'wp_%s' "$(printf '%s' "$1" | tr '-' '_')"; }
 # random_secret [len] : URL-safe random string.
 random_secret() {
 	# No early-closing pipe here: under pipefail, `tr | head -c` aborts the caller with SIGPIPE.
-	local s; s="$(LC_ALL=C head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9')"
+	local s; s="$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')"
 	printf '%s' "${s:0:${1:-20}}"
 }
 # install_mu_plugins <site path> : copy every repo mu-plugin (local SSL trust, one-time login) into the site, once.
