@@ -349,7 +349,7 @@ ensure_services() {
 		ok "redis $(brew services list | awk '$1=="redis"{print $2}')"
 	fi
 	local owner
-	owner="$(lsof -nP -iTCP:1025 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"
+	owner="$(lsof -nP -iTCP:1025 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}' || true)"
 	if [ -n "$owner" ] && [ "mailpit" != "$owner" ]; then
 		warn "port 1025 is held by $owner (MAMP MailHog?) — Mailpit not started; mail from Valet sites still lands there via SMTP"
 	else

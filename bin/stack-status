@@ -61,7 +61,7 @@ done | jq -s 'sort_by(.name)')"
 # loopback-bound local one; normalise lsof's truncated names.
 port_owner() {
 	local names
-	names="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN 2> /dev/null | awk 'NR>1{print $1}' | sort -u)"
+	names="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN 2> /dev/null | awk 'NR>1{print $1}' | sort -u || true)"
 	local pick; pick="$(printf '%s\n' "$names" | /usr/bin/grep -v '^com\.docke' | head -1)"; [ -n "$pick" ] || pick="$(printf '%s\n' "$names" | head -1)"
 	case "$pick" in redis-ser*) echo redis ;; com.docke*) echo docker ;; mysqld) echo mysql ;; *) echo "$pick" ;; esac
 }
