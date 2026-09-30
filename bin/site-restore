@@ -42,7 +42,7 @@ if [ "1" = "$DB_ONLY" ]; then
 	dbq="$(printf '%s' "$db_name" | sed 's/`/``/g')"
 	log "db: rebuilding $db_name from $FROM"
 	mysql_new -e "DROP DATABASE IF EXISTS \`$dbq\`; CREATE DATABASE \`$dbq\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
-	case "$FROM/$DUMP" in *.gz) gzip -dc "$FROM/$DUMP" ;; *) cat "$FROM/$DUMP" ;; esac | sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$db_name"
+	case "$FROM/$DUMP" in *.gz) gzip -dc "$FROM/$DUMP" ;; *) cat "$FROM/$DUMP" ;; esac | LC_ALL=C sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$db_name"
 	n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$(sql_quote "$db_name")' AND TABLE_TYPE='BASE TABLE'")"
 	wp cache flush --quiet 2> /dev/null || true
 	code="$(/usr/bin/curl -4 -sk -o /dev/null -m 15 -w '%{http_code}' "$URL/" || true)"
@@ -82,7 +82,7 @@ if [ -f "$SITE_PATH/wp-config.php" ] && [ -n "$DUMP" ] && [ -f "$FROM/$DUMP" ]; 
 	mysql_new -e "CREATE DATABASE IF NOT EXISTS \`$dbq\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
 	if [ -n "$db_user" ] && [ "root" != "$db_user" ]; then db_ensure_user "$db_name" "$db_user" "$db_pass"; fi
 	log "db: importing into $db_name as it was"
-	case "$FROM/$DUMP" in *.gz) gzip -dc "$FROM/$DUMP" ;; *) cat "$FROM/$DUMP" ;; esac | sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$db_name"
+	case "$FROM/$DUMP" in *.gz) gzip -dc "$FROM/$DUMP" ;; *) cat "$FROM/$DUMP" ;; esac | LC_ALL=C sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$db_name"
 	n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$(sql_quote "$db_name")' AND TABLE_TYPE='BASE TABLE'")"
 	[ "$n_tables" -gt 0 ] || die "import produced no tables"
 	log "db: $n_tables tables"

@@ -26,9 +26,15 @@ out="$("$BREW_PREFIX/bin/nginx" -t -e stderr 2>&1 || true)"
 emerg="$(grep '\[emerg\]' <<<"$out" | grep -v 'nginx.pid' | head -1 || true)"
 if grep -q 'syntax is ok' <<<"$out" && [ -z "$emerg" ]; then add ok "nginx config" "syntax ok"
 else add fail "nginx config" "${emerg:-$(tail -1 <<<"$out")}" "fix the conf under ~/.config/valet/Nginx, then devstack service nginx restart"; fi
+# By executable path, not name: LocalWP's router is an nginx too, on *:80/443, and Valet's more specific 127.0.0.1
+# listener takes the loopback traffic, so LocalWP's *.local sites get Valet's 404.
 for p in 80 443; do
-	owner="$(lsof -nP -iTCP:$p -sTCP:LISTEN 2> /dev/null | awk 'NR>1{print $1}' | sort -u | paste -sd, - || true)"
-	case "$owner" in nginx) add ok "port $p" "nginx" ;; "") add fail "port $p" "nothing listening" "devstack service nginx start" ;; *) add fail "port $p" "held by $owner" "quit $owner (LocalWP router? MAMP? Docker?) then devstack service nginx restart" ;; esac
+	bins="$(lsof -nP -iTCP:$p -sTCP:LISTEN -t 2> /dev/null | sort -u | while read -r pid; do lsof -a -p "$pid" -d txt -Fn 2> /dev/null | sed -n 's/^n//p' | head -1; done | sort -u || true)"
+	others="$(grep -v "^$BREW_PREFIX/" <<<"$bins" | grep . || true)"
+	if [ -z "$bins" ]; then add fail "port $p" "nothing listening" "devstack service nginx start"
+	elif [ -z "$others" ]; then add ok "port $p" "nginx (Homebrew)"
+	elif grep -q 'lightning-services' <<<"$others"; then add fail "port $p" "LocalWP's router nginx also listens here" "in Local: Preferences > Advanced > Router Mode: localhost (or quit Local)"
+	else add fail "port $p" "held by $(while IFS= read -r l; do basename "$l"; done <<<"$others" | sort -u | paste -sd, -) ($(head -1 <<<"$others"))" "quit it (MAMP? Docker?) then devstack service nginx restart"; fi
 done
 
 # --- PHP

@@ -31,9 +31,16 @@ log "=== site-import $NAME from $SRC ($PHPV)"
 
 # 1. Unpack (zip, or a compressed devstack backup) or use the folder as-is.
 WORK="$SRC"; TMP=""
+trap '[ -n "$TMP" ] && rm -rf "$TMP"' EXIT   # before unpacking: a failed import must not leave gigabytes in $TMPDIR
 if [ -f "$SRC" ] && [[ "$SRC" == *.zip ]]; then
 	TMP="$(mktemp -d)"; log "unzipping to $TMP"
-	unzip -q "$SRC" -d "$TMP"; WORK="$TMP"
+	# 1 = warnings, 2 = some entries skipped (a LocalWP export can hold a symlink and real files at the same path).
+	# Everything else is extracted; the WordPress-root check below decides whether that is usable.
+	rc=0; unzip -q "$SRC" -d "$TMP" || rc=$?
+	case "$rc" in 0) ;; 1|2) log "warning: unzip exit $rc (entries above were skipped), continuing" ;; *) die "unzip failed (exit $rc)" ;; esac
+	# unzip restores links stored without permission bits as mode 000; macOS then refuses readlink and rsync fails.
+	find "$TMP" -type l -perm 0 -exec chmod -h 755 {} +
+	WORK="$TMP"
 elif [ -d "$SRC" ] && [ -f "$SRC/manifest.json" ]; then
 	archive="$(jq -r '.files_archive // empty' "$SRC/manifest.json")"
 	if [ -n "$archive" ] && [ -f "$SRC/$archive" ]; then
@@ -42,7 +49,6 @@ elif [ -d "$SRC" ] && [ -f "$SRC/manifest.json" ]; then
 		[ -n "$SQL" ] || SQL="$SRC/$(jq -r '.db_dump // "db.sql.gz"' "$SRC/manifest.json")"
 	fi
 fi
-trap '[ -n "$TMP" ] && rm -rf "$TMP"' EXIT
 
 # 2. Locate the WordPress root and the SQL dump.
 WP_ROOT="$(find "$WORK" -maxdepth 4 -name wp-config.php -not -path '*/node_modules/*' 2> /dev/null | head -1 | xargs -I{} dirname {} || true)"
@@ -60,15 +66,14 @@ rsync -a --exclude 'node_modules' "$WP_ROOT/" "$SITE_PATH/"
 wp() { wp_site "$PHPV" "$SITE_PATH" "$@"; }
 log "files copied to $SITE_PATH"
 
-# 4. Database: fresh schema named after the site, user from wp-config (or a new one), import with --force.
-DB_NAME="$(db_name_for "$NAME")"
-DB_USER="$(wp config get DB_USER 2> /dev/null || true)"; DB_PASS="$(wp config get DB_PASSWORD 2> /dev/null || true)"
-if [ -z "$DB_USER" ] || [ "root" = "$DB_USER" ]; then DB_USER="$DB_NAME"; DB_PASS="$(random_secret 20)"; fi
-[ -n "$DB_PASS" ] || DB_PASS="$(random_secret 20)"
+# 4. Database: fresh schema and a user of its own, both named after the site (the export's DB user could be shared
+# with another import, whose password db_ensure_user would then change), import with --force.
+DB_NAME="$(db_name_for "$NAME")"; DB_USER="$DB_NAME"; DB_PASS="$(random_secret 20)"
 mysql_new -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci"
 db_ensure_user "$DB_NAME" "$DB_USER" "$DB_PASS"
 # LocalWP dumps may carry CREATE DATABASE/USE for their own schema name; strip so everything lands in $DB_NAME.
-read_sql | sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$DB_NAME"
+# LC_ALL=C: in a UTF-8 locale BSD sed stops at the first non-UTF-8 byte and MySQL gets half the dump.
+read_sql | LC_ALL=C sed -E '/^(CREATE DATABASE|USE )/d' | mysql_new --force "$DB_NAME"
 n_tables="$(mysql_new -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$DB_NAME' AND TABLE_TYPE='BASE TABLE'")"
 [ "$n_tables" -gt 0 ] || die "import produced no tables"
 log "db: $DB_NAME ($n_tables tables), user $DB_USER"
@@ -95,6 +100,7 @@ if [ -n "$old_url" ] && [ "$old_url" != "$URL" ]; then
 else
 	log "urls: already $URL"
 fi
+log "db: cleared $(db_clear_transients "$DB_NAME" "$prefix") transients (caches; some hold paths of the old install)"
 wp cache flush --quiet 2> /dev/null || true
 
 # 7. Link, isolate, secure, mu-plugin, smoke.

@@ -18,6 +18,8 @@ The repo is public: never commit site names, database names, hostnames, tokens o
 - Never `nohup` in `bin/` or the dashboard: without a console (php-fpm, LaunchAgents) macOS's nohup exits instead of
   running the command. Background with `cmd < /dev/null > log 2>&1 &` and `disown`.
 - bash 3.2 (macOS) only: no `mapfile`, no `declare -A`; `case` patterns inside `$( … )` must be written `(pattern)`.
+- `LC_ALL=C` on any `sed`/`tr`/`grep` that reads dumps or random bytes: in a UTF-8 locale BSD tools stop at the
+  first invalid byte ("illegal byte sequence"), and under a pipe MySQL gets half a dump. Put it on the tool, not the pipe.
 - Nothing here ever edits `php.ini` in place; PHP settings go in `php/zz-uo-dev.ini` copied to `conf.d/`.
 - Valet machine-local state (`~/.config/valet`) and SQL dumps are never committed.
 - `mu-plugins/*.php` must stay inert off `.test` hosts (check `HTTP_HOST`) and PHP 7.4-compatible; `install_mu_plugins`

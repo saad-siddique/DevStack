@@ -251,8 +251,21 @@ devstack import client ~/Downloads/client.zip --php 8.2
 Import unpacks the zip, finds the WordPress root and the largest `.sql`, copies the files to `~/Sites/client`,
 creates `wp_client` and its user, imports the dump, points wp-config at the new database, drops hard-coded
 `WP_HOME`/`WP_SITEURL` constants, rewrites every old URL (`client.local`, http and https, serialized data included)
-to `https://client.test`, links and secures the site and smoke-tests it. Users and passwords in the database are
-untouched, so your LocalWP credentials still work, and so does `devstack login client`.
+to `https://client.test`, clears transients (caches, and some plugins keep absolute paths of the old install in
+them), links and secures the site and smoke-tests it. Users and passwords in the database are untouched, so your
+LocalWP credentials still work, and so does `devstack login client`.
+
+After an import:
+
+- **Re-activate premium licenses.** Uncanny Automator, Gravity Forms, LearnDash, BuddyBoss Pro and the like keep the
+  license key and the domain it was activated for in the database, so the `.test` site shows the old activation.
+  Activate it again in each plugin's settings, and add the new site in the vendor's account if the vendor counts
+  sites.
+- **Keep LocalWP's router off Valet's ports.** In its default mode LocalWP's nginx listens on `*:80/443`; Valet's
+  more specific `127.0.0.1` listener takes the loopback traffic, so `*.local` sites get a Valet 404. Switch Local to
+  *Preferences > Advanced > Router Mode: localhost*, or quit Local. `devstack doctor` flags it.
+- If `unzip` reports `checkdir error: … exists but is not directory`, the export holds a symlink and real files at
+  the same path (tooling folders such as `.claude/skills` do this). Import logs it as a warning and carries on.
 
 **From any host, or a folder plus a dump.** Import… → Choose… the folder, then Choose… the dump; or
 `devstack import name /path/to/wordpress --sql dump.sql` (`.sql.gz` works).

@@ -122,6 +122,8 @@ sr_flags=(--all-tables --skip-columns=guid --report-changed-only --quiet)
 run wp search-replace "https://$SITE_HOST:8890" "$SITE_URL" "${sr_flags[@]}"
 run wp search-replace "http://$SITE_HOST:8888"  "$SITE_URL" "${sr_flags[@]}"
 run wp search-replace "$SITE_HOST:8890"         "$SITE_HOST.$TLD" "${sr_flags[@]}"
+if [ "1" = "$DRY" ]; then log "DRY: clear transients in $SITE_DB"
+else log "db: cleared $(db_clear_transients "$SITE_DB" "$(wp config get table_prefix 2> /dev/null || echo wp_)") transients (caches; some hold paths of the old install)"; fi
 if [ "1" = "$is_ms" ]; then
 	run wp config set DOMAIN_CURRENT_SITE "$SITE_HOST.$TLD" --quiet
 	if [ "1" != "$(wp config get SUBDOMAIN_INSTALL 2> /dev/null || echo 0)" ]; then

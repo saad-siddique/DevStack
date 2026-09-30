@@ -102,10 +102,30 @@ mysqldump_old() { "$MAMP_MYSQL_BIN/mysqldump" "${MAMP_MYSQL_ARGS[@]}" "$@" 2> >(
 sql_quote() { printf '%s' "$1" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g"; }
 
 # db_ensure_user <db> <user> <pass> : create the MySQL user (localhost + 127.0.0.1) and grant it the schema.
+# An existing user gets this password too (a retried import writes a new one to wp-config). Never root.
 db_ensure_user() {
 	local d u p
+	[ "root" != "$2" ] || die "db_ensure_user: refusing to manage the MySQL root user"
 	d="$(printf '%s' "$1" | sed 's/`/``/g')"; u="$(sql_quote "$2")"; p="$(sql_quote "$3")"
-	mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
+	mysql_new -e "CREATE USER IF NOT EXISTS '$u'@'localhost' IDENTIFIED BY '$p'; CREATE USER IF NOT EXISTS '$u'@'127.0.0.1' IDENTIFIED BY '$p'; ALTER USER '$u'@'localhost' IDENTIFIED BY '$p', '$u'@'127.0.0.1' IDENTIFIED BY '$p'; GRANT ALL ON \`$d\`.* TO '$u'@'localhost', '$u'@'127.0.0.1'; FLUSH PRIVILEGES;"
+}
+
+# db_clear_transients <db> <table prefix> : delete every transient (each site's options table on multisite, plus
+# sitemeta) and print how many went. Transients are caches, and some plugins store absolute paths in them that point
+# at the old install after an import (Uncanny Automator's integration map, then a fatal). SQL, because WP-CLI has to
+# load WordPress first.
+db_clear_transients() {
+	local db d pre t n=0 c
+	db="$(sql_quote "$1")"; d="$(printf '%s' "$1" | sed 's/`/``/g')"; pre="$(sql_quote "$2")"
+	for t in $(mysql_new -N -e "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='$db' AND (TABLE_NAME = '${pre}options' OR TABLE_NAME REGEXP '^${pre}[0-9]+_options\$')"); do
+		c="$(mysql_new -N -e "DELETE FROM \`$d\`.\`$t\` WHERE option_name LIKE '\\_transient\\_%' OR option_name LIKE '\\_site\\_transient\\_%'; SELECT ROW_COUNT();")"
+		n=$(( n + c ))
+	done
+	if [ -n "$(mysql_new -N -e "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA='$db' AND TABLE_NAME='${pre}sitemeta'")" ]; then
+		c="$(mysql_new -N -e "DELETE FROM \`$d\`.\`${2}sitemeta\` WHERE meta_key LIKE '\\_site\\_transient\\_%'; SELECT ROW_COUNT();")"
+		n=$(( n + c ))
+	fi
+	printf '%s' "$n"
 }
 
 # db_name_for <site> : wp_<site> with dashes as underscores (MySQL-safe, readable in phpMyAdmin).
@@ -114,7 +134,8 @@ db_name_for() { printf 'wp_%s' "$(printf '%s' "$1" | tr '-' '_')"; }
 # random_secret [len] : URL-safe random string.
 random_secret() {
 	# No early-closing pipe here: under pipefail, `tr | head -c` aborts the caller with SIGPIPE.
-	local s; s="$(LC_ALL=C head -c 512 /dev/urandom | tr -dc 'A-Za-z0-9')"
+	# LC_ALL=C belongs on tr: in a UTF-8 locale it rejects random bytes ("Illegal byte sequence").
+	local s; s="$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')"
 	printf '%s' "${s:0:${1:-20}}"
 }
 # install_mu_plugins <site path> : copy every repo mu-plugin (local SSL trust, one-time login) into the site, once.
