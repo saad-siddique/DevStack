@@ -65,10 +65,13 @@ case "$CMD" in
 		if [ "1" = "$JSON" ]; then echo "$rows"; else echo "$rows" | jq -r '.[] | "\(.source)\t\(.size)\t\(.path)"' | column -t -s $'\t'; fi ;;
 
 	crashes)
-		# .ips = a real crash; .diag = macOS resource report (Event: disk writes / cpu / wakeups) = a runaway process.
+		# .ips = a real crash; .diag = macOS resource report (Event: disk writes / cpu / wakeups), possibly a runaway.
 		procs='^(php-fpm|php|nginx|mysqld|redis-server|memcached|mailpit|dnsmasq)$'   # php-cgi was MAMP's; not watched
+		# macOS reports disk writes above ~2 GB a day (25 KB/s). MySQL behind a PHPUnit suite does that routinely
+		# (every test rolls back, TRUNCATE recreates the table file); below this rate the report is listed, not flagged.
+		quiet_kbs=256
 		rows="$(find /Library/Logs/DiagnosticReports "$HOME/Library/Logs/DiagnosticReports" \( -name '*.ips' -o -name '*.diag' \) -mmin "-$((HOURS * 60))" 2> /dev/null | while read -r f; do
-			proc=""; ts=""; reason=""; kind=""
+			proc=""; ts=""; reason=""; kind=""; quiet=false
 			case "$f" in
 				(*.ips)
 					proc="$(head -1 "$f" | jq -r '.procName // .name // empty' 2> /dev/null)"
@@ -85,15 +88,21 @@ case "$CMD" in
 					ts="$(sed -nE 's/^Date\/Time: +//p' "$f" | head -1)"
 					[ -n "$ts" ] || ts="$(basename "$f" | sed -E 's/^[^_]+_([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2}).*/\1T\2:\3:\4/')"
 					reason="$(sed -nE 's/^(Duration|Total (CPU|Wakeups|Disk Writes)|Writes): +//p' "$f" | head -1 | xargs)"
-					[ -n "$reason" ] || reason="macOS resource report: $kind" ;;
+					[ -n "$reason" ] || reason="macOS resource report: $kind"
+					if [ "disk writes" = "$kind" ]; then
+						kbs="$(sed -nE 's/.*\(([0-9.]+) KB per second average\).*/\1/p' <<<"$reason")"
+						[ -n "$kbs" ] && awk -v k="$kbs" -v q="$quiet_kbs" 'BEGIN { exit !(k < q) }' && quiet=true
+					fi ;;
 				(*) continue ;;   # bash 3.2 needs the leading paren for case patterns inside $( )
 			esac
-			jq -n --arg f "$f" --arg proc "$proc" --arg ts "$ts" --arg kind "$kind" --arg reason "$reason" '{process:$proc,time:$ts,kind:$kind,reason:$reason,file:$f}'
+			jq -n --arg f "$f" --arg proc "$proc" --arg ts "$ts" --arg kind "$kind" --arg reason "$reason" --argjson quiet "$quiet" '{process:$proc,time:$ts,kind:$kind,reason:$reason,file:$f,quiet:$quiet}'
 		done | jq -s 'sort_by(.time) | reverse')"
 		if [ "1" = "$JSON" ]; then
-			jq -n --argjson rows "$rows" --argjson hours "$HOURS" '{hours:$hours,count:($rows|length),crashes:([$rows[] | select(.kind == "crash")] | length),resource:([$rows[] | select(.kind != "crash")] | length),reports:$rows}'
+			# reports = what the app, dashboard and doctor surface; quiet = routine reports they leave alone.
+			jq -n --argjson rows "$rows" --argjson hours "$HOURS" '[$rows[] | select(.quiet | not)] as $n
+				| {hours:$hours,count:($n|length),crashes:([$n[] | select(.kind == "crash")] | length),resource:([$n[] | select(.kind != "crash")] | length),quiet:([$rows[] | select(.quiet)] | length),reports:$n}'
 		else
-			echo "$rows" | jq -r '.[] | "\(.time)  \(.process)  \(.kind)  \(.reason)"'
+			echo "$rows" | jq -r --arg q "$quiet_kbs" '.[] | "\(.time)  \(.process)  \(.kind)  \(.reason)" + (if .quiet then "  (routine, under \($q) KB/s: not flagged)" else "" end)'
 			[ "$(echo "$rows" | jq length)" -gt 0 ] || echo "no crash or resource reports for stack processes in the last $HOURS h"
 		fi ;;
 

@@ -388,7 +388,9 @@ What keeps a bad plugin, a stuck request or a forgotten service from ruining the
   notification.
 - **macOS reports**: `devstack logs crashes` lists crash reports (`.ips`) and resource reports (`.diag`: disk
   writes, CPU, wakeups) for stack processes. Crashes are red, resource reports orange, in the app, on the dashboard
-  and in `devstack doctor`.
+  and in `devstack doctor`. macOS files a disk-writes report once a process writes about 2 GB in a day, which MySQL
+  does routinely behind a PHPUnit suite (each test rolls back, and `TRUNCATE` recreates the table file). Reports
+  under 256 KB/s stay in `devstack logs crashes`, marked routine, and raise no notice.
 - **`devstack doctor`**: DNS resolver and dnsmasq, nginx and its config, ports 80/443 and who holds them, php-fpm per
   version against the sites that need it, MySQL, Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet
   signs sites for a year), sudoers trust, the devstack link, both LaunchAgents, free disk, backup size, the stray
