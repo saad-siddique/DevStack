@@ -16,15 +16,18 @@ MySQL 8.4 · Mailpit · Redis · Memcached · WP-CLI · phpMyAdmin · one global
 - **Backups that restore verbatim.** Instant APFS clones or compressed archives, database-only save points with
   labels, roll back a database in seconds, archive a site to free disk and restore it later exactly as it was,
   prune old backups.
-- **Share a site publicly.** A stable hostname on your Cloudflare tunnel per site, created and routed for you, with
-  WordPress answering under the public URL so webhooks and remote testers work. Unshare one site at a time.
+- **Share a site publicly.** A stable hostname on your Cloudflare tunnel per site, created and routed for you. While
+  the tunnel is connected, WordPress answers under the public URL in every context (cron and WP-CLI included), so
+  webhooks, remote testers and vendor integrations work; when it stops, the site is back on `.test`. Unshare one site
+  at a time.
 - **Per-site object cache.** Redis or Memcached with a per-site key prefix, on or off from the menu.
 - **Every PHP from 7.4 to 8.6**, php-fpm only for versions in use, Xdebug per version in trigger mode.
 - **Guards.** php-fpm pool limits and slow log, MySQL tuned for local work (no binary log), a watchdog that revives
-  nginx, runaway-process detection, crash and resource reports classified, per-site fatal counts, `devstack doctor`
-  with a fix for every finding and `--fix` to apply the safe ones.
-- **Updates on your terms.** The app checks the repo and Homebrew for you and shows what is waiting; nothing is
-  applied without a click unless you opt into nightly patch upgrades.
+  nginx, runaway-process detection, crash and resource reports classified, per-site fatal counts, PHP extensions that
+  fail to load repaired in one click, `devstack doctor` with a fix for every finding and `--fix` to apply the safe ones.
+- **Updates on your terms.** The app checks the repo and Homebrew for you and lists what is waiting on an Upgrades
+  page (installed → new version, how risky, what restarts); nothing is applied without a click unless you opt into
+  nightly patch upgrades.
 - **Notifications** for service changes, finished tasks, crashes, watchdog restarts and available updates. Mute in
   one click.
 - **Two identical views.** The menu-bar app (⌃⌥D) and `https://dashboard.test` read the same `devstack status`,
@@ -92,15 +95,18 @@ In order, it:
    redis/imagick/memcached/xdebug for every PHP version.
 2. Links `php@8.4` as the command-line `php`, copies `php/zz-uo-dev.ini` into every `/opt/homebrew/etc/php/<v>/conf.d/`
    (512 MB memory, 1 GB uploads, `display_errors` on, `sendmail_path` → Mailpit, Xdebug trigger mode on port 9003)
-   and switches Xdebug off by default.
+   and the php-fpm pool guard `php/zz-devstack-fpm.conf` into every `php-fpm.d/`, and switches Xdebug off by default.
 3. Installs Laravel Valet through Composer, runs `valet install` (nginx, dnsmasq, `/etc/resolver/test`) and
    `valet trust`. Patches Valet's nginx stubs to listen on `[::1]` too and to accept `php@8.6`.
-4. Starts mysql@8.4, mailpit, redis and memcached as `brew services`, so they come back after a reboot.
+4. Starts mysql@8.4, mailpit, redis and memcached as `brew services`, so they come back after a reboot, and installs
+   the MySQL tuning `mysql/zz-devstack.cnf` (no binary log).
 5. Links and secures `dashboard.test`; downloads phpMyAdmin into `~/.local/share/devstack/phpmyadmin` and serves it
    as `phpmyadmin.test`.
-6. Installs a user LaunchAgent, `com.devstack.logs-prune`, that rotates logs daily at 04:00.
-7. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`.
-8. With `--app`: builds `DevStack.app`, installs it into `/Applications` and starts it.
+6. Installs three user LaunchAgents: `com.devstack.logs-prune` rotates logs daily at 04:00, `com.devstack.upgrade`
+   checks Homebrew for stack upgrades at 03:30, `com.devstack.watchdog` revives nginx/dnsmasq every five minutes.
+7. Copies the `mu-plugins/` into every site (one-click login, public sharing, local SSL).
+8. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`.
+9. With `--app`: builds `DevStack.app`, installs it into `/Applications` and starts it.
 
 When it finishes, **DevStack.app is in `/Applications` and already running**: look for the stacked-layers DevStack
 icon in the menu bar, top right, next to the clock. Everything below can be done from that icon. Open a new terminal only if
@@ -116,7 +122,8 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 **The panel**, top to bottom:
 
 - Header: how many services are online, how many sites, the default PHP version; a refresh button and the ⋯ menu
-  (dashboard, repo and Sites folders, Start at login, update checks, Quit).
+  (dashboard, Backups…, Run doctor, repo and Sites folders, Start at login, Notifications, the menu-bar load graph,
+  Check for updates, Quit).
 - Notices, when there are any: **Update available** for this repo; a **runaway** line when a stack process has sat above 120% CPU for 90 seconds or holds
   more than 3 GB, with a Restart button; and a **reports** line when macOS wrote a crash or resource report for a
   stack process in the last 24 hours (Open shows it in Console).
@@ -130,12 +137,18 @@ The icon gains an exclamation badge when a core service is down or launchd repor
   **Mailpit** with the count of caught mails.
 - **Stack load**: CPU and memory of the stack's own processes (php-fpm, nginx, mysqld, redis, memcached, mailpit,
   dnsmasq) over the last three minutes. Sampled only while the panel is open.
-- **Sites**: every linked site with its PHP version and type. Lock = HTTPS, shield = protected. Per row: open the
-  site, log in to wp-admin (key icon), and a ⋯ menu with Open wp-admin, Open folder, Copy URL, Back up now, Remove….
+- **Sites**: every linked site with its PHP version, HTTPS, object cache and folder + database size under the name
+  (the public URL instead while it is shared). Lock = HTTPS, shield = protected. Per row: open the site (compass), a
+  green globe while it is public, wp-admin (gear), log in (key), and a ⋯ menu with favourites, log in, open wp-admin,
+  folder, editor or debug.log, copy URL, PHP version, object cache, share / stop sharing, save point, back up,
+  restore, duplicate and archive.
 - **Services**: nginx, dnsmasq, MySQL, Mailpit, Redis, Memcached with an on/off switch and a restart button, plus who
   owns each port.
 - **PHP**: every installed version with its php-fpm switch (the default version always runs) and an **Xdebug**
-  checkbox (trigger mode, port 9003; ticking it restarts that php-fpm).
+  checkbox (trigger mode, port 9003; ticking it restarts that php-fpm). When an extension fails to load, the row says
+  which and shows **Repair**.
+- **Upgrades** (the label carries the count, *Upgrades 4*): Homebrew releases waiting for the stack and what the last
+  upgrade did; see *Keeping the stack current*.
 - Footer: **New site…** and **Import…**.
 
 **Doing things:**
@@ -147,8 +160,8 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Open a site | Compass icon on its row, or its URL `https://<name>.test`. |
 | Log in to wp-admin | Key icon on its row. A one-time link signs you in as the first administrator; nothing to type. |
 | Back up a site | ⋯ → Back up now. Files are cloned and the database dumped into `~/Backups/DevStack/<site>/<stamp>/`. |
-| Archive a site | ⋯ → Archive (back up, then remove)…. A verbatim backup is taken and kept, then the site is removed. Tick *Compress the files* when you want the disk space back (see Backups below). Protected sites cannot be archived. |
-| Share a site publicly | ⋯ → Share publicly. A Cloudflare tunnel opens: the hostname from your `~/.cloudflared/config.yml` when a rule points at the site, otherwise a random `trycloudflare.com` URL. The URL is copied and opened; a line in the panel shows it with Stop. The site answers under that hostname (a mu-plugin adjusts home/siteurl for tunnel requests), so webhooks and remote testers work. |
+| Archive a site | ⋯ → Archive (back up, then remove)…. A verbatim backup is taken and kept, then the site is removed. *Compress the files* is ticked by default so the disk space is really freed; untick it for an instant clone (see Backups below). Protected sites cannot be archived. |
+| Share a site publicly | ⋯ → Share publicly (Cloudflare tunnel). A tunnel opens: the hostname from your `~/.cloudflared/config.yml` when a rule points at the site, otherwise a random `trycloudflare.com` URL. The URL is copied and opened, and the row shows it with a green globe; ⋯ → Stop sharing unshares that site. While the tunnel is connected the site answers under that hostname everywhere, cron and WP-CLI included (see *Sharing a site publicly*), so webhooks and remote testers work. |
 | Save and roll back a database | ⋯ → Save point (database), seconds. In Backups… a save point has **Roll back database**: drop, recreate, import, files untouched. |
 | Object cache | ⋯ → Object cache → Redis / Memcached / Off. Installs the plugin and drop-in with a per-site key prefix, so sites sharing one Redis never collide; the row shows "redis cache". |
 | Pin the sites you use daily | ⋯ → Add to favourites. Favourites show a ★ and always sort first, whatever the sort; the dashboard has the same star in the Site column. |
@@ -157,6 +170,8 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Duplicate a site | ⋯ → Duplicate…. Backs up, then imports the backup under the new name with its own database and rewritten URLs. |
 | Manage backups | ⋯ menu → Backups…: every backup with date, size and PHP version; Restore, Show in Finder, Delete; *Keep newest 5 per site* prunes the rest. |
 | Spot a broken site | A red badge and "N fatals in debug.log" on the row when WordPress logged PHP fatals today or yesterday; ⋯ → Open debug.log. |
+| Upgrade the stack | Upgrades tab → **Upgrade now** (patch releases) or **Upgrade all**. The table shows each package's installed → new version, how risky the change is and what restarts. |
+| Repair a PHP version | PHP tab → **Repair**, shown when an extension fails to load (Homebrew rebuilt PHP or the extension on its own). Reinstalls that PHP and its extensions. |
 | Start/stop a service | Services tab → switch. Restart with the arrow. |
 | Switch Xdebug on or off | PHP tab → Xdebug checkbox on that version. |
 | Stop an idle PHP version | PHP tab → switch (the default version stays on). |
@@ -188,7 +203,7 @@ renders every window to `docs/img/*.png` with made-up site names.
 |---|---|
 | The app | `/Applications/DevStack.app`, built from `app/` |
 | Site files | `~/Sites/<name>` (`SITES_DIR=…` in your shell to use another folder) |
-| Settings and state | `~/.local/share/devstack/` (`settings.json` for the nightly-upgrade choice, `upgrades.json` for the last check) |
+| Settings and state | `~/.local/share/devstack/`: `settings.json` (nightly-upgrade choice, favourites, share hostname pattern), `upgrades.json` (last Homebrew check and run), `sizes.json` (folder sizes), `share.json` (devstack's tunnel), `share-live.json` (what connected tunnels serve, 15 s cache) |
 | Valet state | `~/.config/valet`: `Sites/` links, `Nginx/` per-site confs, `Certificates/`, `Log/` |
 | Databases | `/opt/homebrew/var/mysql`; per site one `wp_<name>` schema and a `wp_<name>` user, `DB_HOST 127.0.0.1` |
 | PHP settings | `/opt/homebrew/etc/php/<v>/php.ini` is never edited; overrides live in `conf.d/zz-uo-dev.ini` |
@@ -213,10 +228,10 @@ devstack import client ~/Downloads/client.zip    # LocalWP export, any zip/folde
 devstack backup myplugin                         # ~/Backups/DevStack/myplugin/<stamp>/ — see Backups
 devstack backups                                 # list them, newest first
 devstack backups --prune --keep 5                # delete older backups (the newest of every site always stays)
-devstack archive myplugin [--compress]           # verbatim backup, then remove the site; --compress really frees the disk
+devstack archive myplugin [--no-compress]        # verbatim backup (files compressed, disk freed), then remove the site
 devstack sizes [--refresh]                       # disk per site folder (the nightly run refreshes; --refresh walks now)
 devstack favorite myplugin [on|off]              # pin a site to the top of the Sites list, in the app and on the dashboard
-devstack share myplugin | --stop                 # public URL through Cloudflare: your named tunnel if ~/.cloudflared maps one, else a quick one
+devstack share myplugin | --stop [myplugin]      # public URL through Cloudflare: your named tunnel if ~/.cloudflared maps one, else a quick one
 devstack cache myplugin redis|memcached|off      # persistent object cache for one site (per-site key prefix, shared servers)
 devstack backup myplugin --db-only --label "x"   # database save point; devstack restore myplugin --db-only rolls back to the newest
 devstack doctor --fix                            # start what is stopped, re-run bootstrap for gaps, check again
@@ -230,11 +245,13 @@ devstack doctor                                  # check everything (DNS, nginx,
 devstack open myplugin | dashboard | phpmyadmin | mailpit
 devstack xdebug on --php 8.4                     # trigger mode, port 9003; XDEBUG_TRIGGER=1 or a browser helper starts a session
 devstack service mailpit restart                 # nginx dnsmasq mysql@8.4 mailpit redis memcached php@<any installed>
+devstack php-repair 8.6                          # reinstall PHP 8.6 + its extensions when some fail to load
 devstack status | jq .                           # what the dashboard and the app read
 devstack logs list                               # every stack log with size: nginx php php-fpm mysql redis mailpit, wp <site>
 devstack logs php -n 100                         # tail one; `devstack logs crashes` lists macOS crash reports for stack processes
 devstack logs-prune                              # rotate now (the LaunchAgent does this daily at 04:00)
 devstack update                                  # git pull + bootstrap
+devstack upgrade --check | --auto | --all        # Homebrew upgrades of the stack (see Keeping the stack current)
 devstack app install | open | snapshot | status  # the menu-bar app
 devstack help                                    # all of the above
 ```
@@ -304,15 +321,16 @@ read-only on the site.
 ## One-click login
 
 The key icon on a site row, "Log in to wp-admin" after creating a site, or `devstack login <site>`: each mints a 48-hex one-time token, stores
-its SHA-256 as a 60-second transient through WP-CLI, and opens `https://<site>.test/?uo_login=<token>`. The
-`uo-local-autologin.php` mu-plugin, installed into every site by `new`, `import`, `migrate` and on first `login`,
-checks that the host ends in `.test`, deletes the transient, compares hashes with `hash_equals`, sets the auth cookie
-and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account; the default is
+its SHA-256 as a 60-second transient through WP-CLI, and opens `<home>/?uo_login=<token>`, where `<home>` is
+`https://<site>.test`, or the public URL while a tunnel serves the site. The `uo-local-autologin.php` mu-plugin,
+installed into every site by `bootstrap`, `new`, `import`, `migrate` and on first `login`, checks that the host the
+request arrived with ends in `.test` (devstack's tunnels send `<site>.test`), deletes the transient, compares hashes
+with `hash_equals`, sets the auth cookie and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account; the default is
 the first administrator (the first super admin on multisite).
 
 ## Sharing a site publicly
 
-`devstack share <site>`, or the globe in the app's site menu and the dashboard's Actions column, gives a local site a
+`devstack share <site>`, or Share publicly in the app's site ⋯ menu and the globe in the dashboard's Actions column, gives a local site a
 public URL through Cloudflare, detached, until you stop it:
 
 - **A hostname on your zone (the reliable path).** If `~/.cloudflared/config.yml` has an ingress rule whose
@@ -328,7 +346,8 @@ public URL through Cloudflare, detached, until you stop it:
   `cloudflared tunnel create <name>`) and forget about it.
 
 `--stop <site>` unshares one site: its rule is switched off in `config.yml` (commented with `#off`, so a hand-picked
-hostname survives) and the tunnel restarts for the sites that remain; `--stop` alone ends everything. `--status` and
+hostname survives) and the tunnel restarts for the sites that remain; `--stop` alone ends devstack's tunnel (the rules
+stay, and a tunnel another project started keeps running). `--status` and
 `devstack status` show what is public. In both the app and the dashboard the shared site's own row carries the public
 URL (copy, open) and the green globe unshares that site; nothing sits up top.
 
@@ -366,7 +385,7 @@ three seconds.
   Backups… drops and rebuilds the database from one; files stay.
 - **Footprint**: `devstack status` carries each site's database size (live, from `information_schema`) and folder
   size (from `devstack sizes --refresh`, which the 03:30 run performs; a `du` over 80 GB takes minutes, so it is
-  never done on a status read). The app's Sites tab and the dashboard's Disk column show the same numbers, sort by
+  never done on a status read). The app's Sites tab and the dashboard's Site column (under the name) show the same numbers, sort by
   them, and can trigger a fresh measurement.
 - **Restore** (`devstack restore <site>`, newest backup by default, `--from DIR` for another) puts the site back
   verbatim: files cloned back, wp-config untouched, so the same database name, user and password, `.valetrc` PHP
@@ -388,7 +407,8 @@ three seconds.
 - Retention: the `com.devstack.logs-prune` LaunchAgent runs `bin/logs-prune` daily at 04:00. Each log is copied to
   `.1` and truncated in place, so writers keep appending; `.1` files older than 48 hours are deleted and any live log
   over 100 MB is rotated at once.
-- Dashboard writes (start/stop, Xdebug) are POST requests that require the `X-Devstack: 1` header and only call the
+- Dashboard writes (services, Xdebug, upgrades and the nightly setting, favourites, sharing, one-click login, folder
+  sizes, PHP repair, clearing a log) are POST requests that require the `X-Devstack: 1` header and only call the
   `bin/` commands with allow-listed arguments, so another website open in your browser cannot trigger them.
 
 ## Guards
@@ -414,10 +434,12 @@ What keeps a bad plugin, a stuck request or a forgotten service from ruining the
   and in `devstack doctor`. macOS files a disk-writes report once a process writes about 2 GB in a day, which MySQL
   does routinely behind a PHPUnit suite (each test rolls back, and `TRUNCATE` recreates the table file). Reports
   under 256 KB/s stay in `devstack logs crashes`, marked routine, and raise no notice.
-- **`devstack doctor`**: DNS resolver and dnsmasq, nginx and its config, ports 80/443 and who holds them, php-fpm per
-  version against the sites that need it, MySQL, Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet
-  signs sites for a year), sudoers trust, the devstack link, both LaunchAgents, free disk, backup size, the stray
-  wp-config trap, recent reports. Every finding comes with the command that fixes it. Exit 1 when something is red.
+- **`devstack doctor`**: DNS resolver and dnsmasq, nginx and its config, ports 80/443 and which program holds them (by
+  path, so LocalWP's router nginx is caught), php-fpm per version against the sites that need it, PHP extensions that
+  fail to load, MySQL, Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet signs sites for a year),
+  sudoers trust, the devstack link, the three LaunchAgents, free disk, old root-owned PHP builds Homebrew cannot clean,
+  backup size, the stray wp-config trap, recent reports. Every finding comes with the command that fixes it. Exit 1
+  when something is red.
 - **Logs** rotate daily and never outlive 48 hours (see below).
 
 ## Keeping the stack current
@@ -473,28 +495,32 @@ devstack update                 # git pull --ff-only, then bootstrap.sh; rebuild
 devstack app install            # rebuild and relaunch the app by hand
 ```
 
-To remove DevStack (sites in `~/Sites` and databases under `/opt/homebrew/var/mysql` stay until you delete them):
+To remove DevStack (sites in `~/Sites`, databases under `/opt/homebrew/var/mysql` and backups stay until you delete
+them):
 
 ```bash
-devstack app uninstall
-for a in logs-prune upgrade; do launchctl bootout gui/$(id -u)/com.devstack.$a; rm ~/Library/LaunchAgents/com.devstack.$a.plist; done
-valet uninstall --force         # nginx, dnsmasq, /etc/resolver/test, certificates
-brew services stop mysql@8.4 mailpit redis memcached
-rm /opt/homebrew/bin/devstack /opt/homebrew/share/zsh/site-functions/_devstack
+devstack uninstall --yes            # the app, the three LaunchAgents, any share tunnel, Valet, the data services, the devstack command
+devstack uninstall --yes --purge    # also ~/.local/share/devstack (phpMyAdmin, settings, caches)
 ```
+
+Homebrew formulae stay installed; the last line it prints is the `brew uninstall` command that removes them.
 
 ## Repo layout and ground rules
 
 ```
-Brewfile              php 7.4–8.6 (+ redis/imagick/memcached/xdebug per version), mysql@8.4, mailpit, redis, memcached, wp-cli, composer
+Brewfile              php 7.4–8.6 (+ redis/imagick/memcached/xdebug per version), mysql@8.4, mailpit, redis, memcached,
+                      wp-cli, composer, cloudflared, zstd
 bootstrap.sh          idempotent; the only thing anyone must run (`--app` also builds and installs the menu-bar app)
-php/                  zz-uo-dev.ini drop-in, copied into each /opt/homebrew/etc/php/<v>/conf.d/
+php/                  zz-uo-dev.ini (conf.d/) and zz-devstack-fpm.conf (php-fpm.d/), copied into every PHP version
+mysql/                zz-devstack.cnf: MySQL tuned for local work
 drivers/              LocalValetDriver for subdirectory multisites
-mu-plugins/           uo-local-ssl.php (trust the local CA), uo-local-autologin.php (one-time login); .test hosts only
+mu-plugins/           uo-local-ssl.php (trust the local CA), uo-local-autologin.php (one-time login), uo-local-share.php
+                      (public hostname while a tunnel serves the site); .test sites only
 dashboard/            dashboard.test (PHP + a little JS)
-bin/                  THE CONTRACT — devstack (dispatcher)  site-new  site-import  site-backup  site-login  site-remove
-                      php-xdebug  php-repair  service  stack-status  stack-upgrade  update  logs  logs-prune  migrate-site  migrate-all
-                      mamp-backout  app
+bin/                  THE CONTRACT — devstack (dispatcher)  site-new  site-import  site-backup  site-restore  site-clone
+                      site-remove  site-login  site-php  site-share  site-cache  site-sizes  site-favorite  php-xdebug
+                      php-repair  service  stack-status  stack-upgrade  doctor  watchdog  update  uninstall  logs
+                      logs-prune  migrate-site  migrate-all  mamp-backout  app
 completions/          zsh completion for devstack
 app/                  DevStack.app: SwiftUI MenuBarExtra + Swift Charts, Swift Package; only ever runs `devstack …`
                       Icon.svg is the single icon source (app icon, menu-bar template images, dashboard favicon)

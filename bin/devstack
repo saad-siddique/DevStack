@@ -19,19 +19,21 @@ usage() {
 devstack — native local WordPress stack (Valet, Homebrew PHP 7.4–8.6, MySQL 8.4, Mailpit, Redis, Memcached)
 
 Sites
-  devstack new <name> [--php 8.2] [--empty]     fresh WordPress at https://<name>.$TLD (prints the admin password once)
+  devstack new <name> [--php 8.2] [--empty]     fresh WordPress at https://<name>.$TLD (wp-admin admin / admin1; --admin-user/-password/-email)
   devstack import <name> <zip|folder> [--php X] LocalWP export, any folder + .sql, or a devstack backup folder
-  devstack backup <name> [--db-only]            ~/Backups/DevStack/<name>/<stamp>/ (files clone + db.sql.gz)
+  devstack backup <name> [--db-only] [--label T] ~/Backups/DevStack/<name>/<stamp>/ (files clone + db.sql.gz); --db-only = save point
   devstack backups [name] | --prune [--keep 5]  list backups | delete old ones (newest per site always kept)
-  devstack archive <name> [--compress]          verbatim backup, then remove the site; --compress packs the files (frees disk)
-  devstack restore <name> [--from DIR] [--replace]   recreate a site from its backup: same URL, PHP, database, logins
+  devstack archive <name> [--no-compress]       verbatim backup (files compressed, disk freed), then remove the site
+  devstack restore <name> [--from DIR] [--replace] [--db-only]   recreate a site from its backup (same URL, PHP, database,
+                                                logins); --db-only rolls the database back to a save point
   devstack clone <source> <new-name> [--php X]  copy of a site under a new name (URLs rewritten, own database)
   devstack remove <name> --yes [--backup]       unlink, unsecure, drop database + user, delete folder
   devstack sites                                every linked site with its PHP version
   devstack sizes [--refresh]                    folder size per site (refresh walks the disk; the nightly run does too)
   devstack favorite <name> [on|off]             pin a site to the top of the Sites list (app and dashboard)
   devstack cache <name> redis|memcached|off     persistent object cache for one site (per-site key prefix)
-  devstack share <name> [--hostname H] | --stop public URL through Cloudflare (named tunnel from ~/.cloudflared, else quick)
+  devstack share <name> [--hostname H]          public URL through Cloudflare (named tunnel from ~/.cloudflared, else quick)
+  devstack share --stop [name] | --status       unshare one site, or stop devstack's tunnel; what is public
   devstack php <name> <7.4|8.2|…|default>       switch the PHP version one site runs on
   devstack login <name> [--user U] [--print]    open wp-admin already signed in (one-time link, 60 s)
   devstack open [dashboard|phpmyadmin|mailpit|<site>]
@@ -44,6 +46,7 @@ Stack
   devstack watchdog                             restart nginx/dnsmasq if launchd lost them (runs every 5 min by itself)
   devstack service <name> start|stop|restart    nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
   devstack xdebug on|off|status [--php 8.4]     trigger mode, port 9003
+  devstack php-repair <X.Y>                     reinstall PHP X.Y and its extensions when some fail to load
   devstack logs [list|<source>|wp <site>|crashes|clear ...]
   devstack logs-prune                           rotate now (LaunchAgent does it daily)
 
@@ -52,7 +55,7 @@ Repo
   devstack update [--check] [--app]             git pull + bootstrap (rebuilds the app when app/ changed); --check only reports
   devstack upgrade --check|--auto|--all         Homebrew upgrades of the stack (--auto = patch releases only); nightly 03:30 check
   devstack upgrade --set-auto off|patch|all     what the nightly run may apply unattended (default off: report only)
-  devstack app build|install|open|uninstall|status
+  devstack app build|install|open|uninstall|status|snapshot
   devstack path                                 print the repo directory
 
 Every command accepts --json where a tool consumes it. Repo: $REPO

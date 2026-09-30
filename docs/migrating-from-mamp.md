@@ -36,7 +36,8 @@ devstack migrate <protected> --i-have-a-backup   # a protected site: alone, last
 Per site, `migrate-site` links the folder, isolates its PHP version, secures it, creates the database user, dumps the
 MAMP database (`mysqldump --force`, so a stale view cannot abort it) and imports it into MySQL 8.4, sets
 `DB_HOST 127.0.0.1`, rewrites every old URL (`https://<host>:8890`, `http://<host>:8888`, bare `<host>:8890`) with
-`wp search-replace`, replaces `WP_HOME`/`WP_SITEURL` constants that still point at MAMP, installs the mu-plugins and
+`wp search-replace`, clears transients (caches that can hold MAMP-era paths), replaces `WP_HOME`/`WP_SITEURL`
+constants that still point at MAMP, installs the mu-plugins and
 smoke-tests the result (IPv4 and IPv6 200, no fatal in the body, `siteurl`, loopback). It is idempotent: running it
 again on a migrated site is a no-op. Logs land in `~/Library/Logs/DevStack/`, pre-migration dumps beside them.
 

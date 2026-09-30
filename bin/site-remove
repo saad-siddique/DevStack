@@ -13,7 +13,7 @@ for arg in "$@"; do
 		*) NAME="$arg" ;;
 	esac
 done
-[ -n "$NAME" ] || die "usage: site-remove <name> --yes [--backup] [--keep-files] [--keep-db]"
+[ -n "$NAME" ] || die "usage: site-remove <name> --yes [--backup [--no-compress]] [--keep-files] [--keep-db]"
 [ "1" = "$YES" ] || die "refusing without --yes (this deletes the folder and the database)"
 is_protected "$NAME" && die "$NAME is a PROTECTED site in sites.tsv; not removing"
 SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || echo "$SITES_DIR/$NAME")"

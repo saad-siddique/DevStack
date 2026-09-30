@@ -20,14 +20,17 @@ _devstack() {
 	if (( CURRENT == 2 )); then _describe 'command' cmds; return; fi
 	case $words[2] in
 		php) (( CURRENT == 3 )) && _devstack_sites || { local -a v; v=( default ${(f)"$(ls "$(_devstack_php_dir)" 2> /dev/null)"} ); _describe 'php version' v; } ;;
-		remove|rm|backup|migrate|login|archive|restore|clone) (( CURRENT == 3 )) && _devstack_sites || _arguments '--yes' '--backup' '--keep-files' '--keep-db' '--db-only' '--files-only' '--user' '--print' '--replace' '--from:dir:_files -/' '--php' '--compress' '--json' ;;
+		remove|rm|backup|migrate|login|archive|restore|clone) (( CURRENT == 3 )) && _devstack_sites || _arguments '--yes' '--backup' '--keep-files' '--keep-db' '--db-only' '--files-only' '--user' '--print' '--replace' '--from:dir:_files -/' '--php' '--compress' '--no-compress' '--label' '--json' ;;
 		sizes) _arguments '--refresh' '--json' ;;
 		favorite|fav|star) (( CURRENT == 3 )) && _devstack_sites || { local -a o; o=( on off toggle ); _describe 'state' o; } ;;
-		share) (( CURRENT == 3 )) && { _devstack_sites; _arguments '--stop' '--status'; } || _arguments '--hostname' '--json' ;;
+		share)
+			if (( CURRENT == 3 )); then _devstack_sites; _arguments '--stop' '--status'
+			elif [[ $words[3] == --stop ]]; then _devstack_sites
+			else _arguments '--hostname' '--json'; fi ;;
 		cache) (( CURRENT == 3 )) && _devstack_sites || { local -a o; o=( redis memcached off status ); _describe 'backend' o; } ;;
 		backups) (( CURRENT == 3 )) && { _devstack_sites; _arguments '--prune' '--delete:dir:_files -/'; } || _arguments '--keep' '--older-than' '--dry-run' '--json' ;;
 		open) local -a t; t=( dashboard phpmyadmin mailpit ); _describe 'target' t; _devstack_sites ;;
-		new) (( CURRENT == 3 )) || _arguments '--php[PHP version]:version:_devstack_php' '--empty' '--title' '--json' ;;
+		new) (( CURRENT == 3 )) || _arguments '--php[PHP version]:version:_devstack_php' '--empty' '--title' '--admin-user' '--admin-password' '--admin-email' '--json' ;;
 		import) (( CURRENT == 4 )) && _files || _arguments '--php[PHP version]:version:_devstack_php' '--sql:file:_files' '--json' ;;
 		service|svc)
 			if (( CURRENT == 3 )); then
@@ -35,8 +38,8 @@ _devstack() {
 			else local -a o; o=( start stop restart status ); _describe 'operation' o; fi ;;
 		php-repair) _devstack_php ;;
 		xdebug) (( CURRENT == 3 )) && { local -a o; o=( on off status ); _describe 'operation' o; } || _arguments '--php[PHP version]:version:_devstack_php' '--json' ;;
-		logs) local -a src; src=( list nginx php php-fpm mysql redis mailpit prune wp crashes clear ); (( CURRENT == 3 )) && _describe 'source' src || _devstack_sites ;;
-		app) local -a a; a=( build install open uninstall status ); _describe 'action' a ;;
+		logs) local -a src; src=( list nginx php php-fpm slow mysql redis mailpit prune upgrade watchdog wp crashes clear ); (( CURRENT == 3 )) && _describe 'source' src || _devstack_sites ;;
+		app) local -a a; a=( build install open uninstall status snapshot ); _describe 'action' a ;;
 		bootstrap) _arguments '--app' ;;
 		update) _arguments '--check' '--app' '--json' ;;
 		doctor) _arguments '--fix' '--json' ;;

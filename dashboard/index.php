@@ -251,7 +251,7 @@ header( 'Cache-Control: no-store' );
 		<div class="rail-foot">
 			<button class="act" type="button" id="refresh">Refresh</button>
 			<span id="age" aria-live="polite"></span>
-			<p>Reloads once a minute while this tab is visible. Actions run <code>bin/service</code>, <code>bin/php-xdebug</code> and <code>bin/stack-upgrade</code>.</p>
+			<p>Reloads once a minute while this tab is visible. Every action runs the same <code>devstack</code> command you could type.</p>
 		</div>
 	</aside>
 
@@ -335,12 +335,18 @@ header( 'Cache-Control: no-store' );
 			</header>
 			<ul class="tools" id="tools"></ul>
 			<h3>From the terminal</h3>
-			<pre class="cheat">bin/site-new name --php 8.2        new WordPress site at https://name.test
-bin/site-import name export.zip    LocalWP export, or any folder + .sql
-bin/site-remove name --yes         unlink, unsecure, drop database, delete folder
-bin/php-xdebug on --php 8.4        trigger mode on port 9003
-bin/service redis restart          nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
-bin/logs php -n 100                nginx php php-fpm mysql redis mailpit, wp &lt;site&gt;, crashes</pre>
+			<pre class="cheat">devstack new name --php 8.2        new WordPress site at https://name.test (admin / admin1)
+devstack import name export.zip    LocalWP export, any folder + .sql, or a DevStack backup
+devstack login name                open wp-admin already signed in
+devstack backup name               files + database into ~/Backups/DevStack/name/
+devstack archive name              verbatim backup, then remove the site
+devstack share name                public URL through your Cloudflare tunnel
+devstack php name 7.4              switch the PHP version one site runs on
+devstack xdebug on --php 8.4       trigger mode on port 9003
+devstack service redis restart     nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
+devstack logs php -n 100           nginx php php-fpm mysql redis mailpit, wp &lt;site&gt;, crashes
+devstack doctor --fix              check everything, fix what is safe
+devstack help                      every command</pre>
 		</section>
 	</main>
 </div>

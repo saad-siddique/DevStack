@@ -23,7 +23,9 @@ The repo is public: never commit site names, database names, hostnames, tokens o
 - Nothing here ever edits `php.ini` in place; PHP settings go in `php/zz-uo-dev.ini` copied to `conf.d/`.
 - Valet machine-local state (`~/.config/valet`) and SQL dumps are never committed.
 - `mu-plugins/*.php` must stay inert off `.test` hosts (check `HTTP_HOST`) and PHP 7.4-compatible; `install_mu_plugins`
-  in `bin/lib.sh` copies all of them, so a new one needs no wiring.
+  in `bin/lib.sh` copies all of them, so a new one needs no wiring. While a tunnel pins a site, `uo-local-share`
+  rewrites `HTTP_HOST` to the public host at load; code that needs the host the request arrived with reads
+  `$_SERVER['UO_LOCAL_HOST']`. devstack's own WP-CLI checks of a site's `.test` identity set `DEVSTACK_NO_PIN=1`.
 
 ## Hard rules
 - Sites marked `protected=yes` in `sites.local.tsv` are never removed, archived or batch-migrated; `migrate-site`
@@ -39,6 +41,10 @@ The repo is public: never commit site names, database names, hostnames, tokens o
   provides php@7.4 with bottles (`brew trust shivammathur/php` required).
 - Valet 4.12.0 needs the IPv6 `listen [::1]` workaround (handoff 9.7) until the next release.
 - The macOS 27 ObjC fork crash affects MAMP php-cgi, not Homebrew php-fpm.
+- cloudflared's metrics server listens on `127.0.0.1:20241` (up to 20245 for further connectors) without any flag:
+  `/ready` (`readyConnections`), `/config` (the ingress the running connector serves, JSON), `/quicktunnel`. A
+  connector started by another project (`cloudflared tunnel run <name>`) serves `~/.cloudflared/config.yml` too, so a
+  rule in that file says nothing about whether a tunnel is up; ask the metrics server.
 - Xcode.app may be installed but unusable until its licence is accepted; `bin/app` checks
   `xcodebuild -checkFirstLaunchStatus` and falls back to the Command Line Tools, which build everything except that
   the SDK's `@State` macro plugin is missing (hence the `FormModel` pattern in `app/`).
