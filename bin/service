@@ -30,8 +30,8 @@ if [ "status" != "$OP" ]; then
 	if ! brew_services "$OP" "$FORMULA" > /dev/null 2>&1; then
 		hint=""
 		case "$NAME" in
-			redis) o="$(lsof -nP -iTCP:6379 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"; [ -n "$o" ] && hint=" (port 6379 is held by $o — a Docker container?)" ;;
-			mailpit) o="$(lsof -nP -iTCP:1025 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}')"; [ -n "$o" ] && hint=" (port 1025 is held by $o)" ;;
+			redis) o="$(lsof -nP -iTCP:6379 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}' || true)"; [ -n "$o" ] && hint=" (port 6379 is held by $o — a Docker container?)" ;;
+			mailpit) o="$(lsof -nP -iTCP:1025 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}' || true)"; [ -n "$o" ] && hint=" (port 1025 is held by $o)" ;;
 		esac
 		die "brew services $OP $NAME failed$hint"
 	fi
