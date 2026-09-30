@@ -11,7 +11,9 @@ add_action(
 		if ( empty( $_GET['uo_login'] ) || defined( 'WP_CLI' ) ) {
 			return;
 		}
-		$host = isset( $_SERVER['HTTP_HOST'] ) ? (string) $_SERVER['HTTP_HOST'] : '';
+		// While a tunnel pins the site, uo-local-share has rewritten HTTP_HOST to the public host; the Host the request
+		// arrived with (devstack's tunnels send <site>.test) is kept in UO_LOCAL_HOST.
+		$host = isset( $_SERVER['UO_LOCAL_HOST'] ) ? (string) $_SERVER['UO_LOCAL_HOST'] : ( isset( $_SERVER['HTTP_HOST'] ) ? (string) $_SERVER['HTTP_HOST'] : '' );
 		if ( '.test' !== substr( $host, -5 ) ) {
 			return;
 		}

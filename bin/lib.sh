@@ -169,8 +169,9 @@ site_finalize() {
 	fatal="$(/usr/bin/curl -s -m 15 "$url/" | /usr/bin/grep -cE 'Fatal error|Parse error|Uncaught (Error|Exception)' || true)"
 	fpm="$(/usr/bin/curl -sI -m 15 "$url/" | awk 'tolower($1)=="x-powered-by:"{print $2}' | tr -d '\r' || true)"
 	if [ -f "$path/wp-config.php" ]; then
-		siteurl="$(wp_site "$php" "$path" option get siteurl 2> /dev/null | tail -1 | sed 's#/$##')"
-		loop="$(wp_site "$php" "$path" eval 'echo is_wp_error( wp_remote_get( home_url( "/wp-json/" ) ) ) ? "ERR" : "OK";' 2> /dev/null | tail -1)"
+		# DEVSTACK_NO_PIN: check the site's own .test identity even while a tunnel pins it to a public hostname.
+		siteurl="$(DEVSTACK_NO_PIN=1 wp_site "$php" "$path" option get siteurl 2> /dev/null | tail -1 | sed 's#/$##')"
+		loop="$(DEVSTACK_NO_PIN=1 wp_site "$php" "$path" eval 'echo is_wp_error( wp_remote_get( home_url( "/wp-json/" ) ) ) ? "ERR" : "OK";' 2> /dev/null | tail -1)"
 	fi
 	local ok=true
 	[ "200" = "$code4" ] && [ "200" = "$code6" ] && [ "0" = "$fatal" ] || ok=false

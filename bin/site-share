@@ -11,10 +11,13 @@
 #   * a QUICK tunnel (random *.trycloudflare.com URL) only when there is no named tunnel at all; the edge often answers
 #     530/1033 for a minute or longer on those.
 # The tunnel runs detached; state in $DATA_DIR/share.json (stack-status embeds it), log in $LOG_DIR/share.log.
-# The uo-local-share mu-plugin makes WordPress answer under the public hostname.
+# The uo-local-share mu-plugin makes WordPress answer under the public hostname in every context (browser, tunnel,
+# WP-Cron, WP-CLI) while a connected cloudflared serves the site (read from its metrics server, cached 15 s in
+# $DATA_DIR/share-live.json, which this script deletes whenever it starts or stops a tunnel).
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 CF="$BREW_PREFIX/bin/cloudflared"; CONF="$HOME/.cloudflared/config.yml"; STATE="$DATA_DIR/share.json"; SHARELOG="$LOG_DIR/share.log"
+LIVE="$DATA_DIR/share-live.json"   # uo-local-share's cache of what connected tunnels serve
 NAME="" ; HOSTNAME_WANT="" ; OP="start" ; JSON=0
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -79,7 +82,7 @@ case "$OP" in
 		fi
 		pid="$(state_pid)"
 		if alive "$pid"; then kill "$pid" 2> /dev/null || true; sleep 1; alive "$pid" && kill -9 "$pid" 2> /dev/null || true; log "stopped tunnel (pid $pid)"; fi
-		rm -f "$STATE"
+		rm -f "$STATE" "$LIVE"
 		[ "1" = "$JSON" ] && echo '{"running":false,"ok":true}' || echo "sharing stopped"
 		exit 0 ;;
 esac
@@ -171,5 +174,6 @@ else
 fi
 jq -n --arg mode "$mode" --argjson pid "$pid" --argjson sites "$sites" --argjson urls "$urls" --argjson pairs "$pairs" --arg url "$url" --arg site "$NAME" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 	'{mode:$mode,pid:$pid,site:$site,url:$url,sites:$sites,urls:$urls,pairs:$pairs,started:$at}' > "$STATE"
+rm -f "$LIVE"
 log "sharing $NAME at $url ($mode tunnel, pid $pid)"
 if [ "1" = "$JSON" ]; then jq '. + {running:true,ok:true}' "$STATE"; else echo "$url"; fi

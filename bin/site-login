@@ -36,7 +36,10 @@ TOKEN="$(LC_ALL=C head -c 64 /dev/urandom | xxd -p | tr -d '\n' | cut -c1-48)"
 HASH="$(printf '%s' "$TOKEN" | shasum -a 256 | cut -d' ' -f1)"
 wp transient set uo_local_autologin "$(jq -cn --arg h "$HASH" --argjson u "$USER_ID" '{hash:$h,user:$u}')" 60 --quiet \
 	|| die "could not store the login token (is the database up?)"
-LOGIN_URL="$URL/?uo_login=$TOKEN"
+# The site's current home: its public URL while a tunnel pins it, so the cookie and the wp-admin redirect share a host.
+BASE="$(wp option get home 2> /dev/null | tail -1 | sed 's#/$##' || true)"
+case "$BASE" in https://*|http://*) ;; *) BASE="$URL" ;; esac
+LOGIN_URL="$BASE/?uo_login=$TOKEN"
 
 if [ "1" = "$JSON" ]; then
 	jq -n --arg url "$LOGIN_URL" --arg user "$USER_LOGIN" --argjson id "$USER_ID" --arg site "$NAME" '{site:$site,user:$user,user_id:$id,url:$url,expires_in:60,ok:true}'

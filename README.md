@@ -334,11 +334,21 @@ URL (copy, open) and the green globe unshares that site; nothing sits up top.
 
 WordPress under a foreign hostname would normally redirect to its `.test` address. The `uo-local-share.php`
 mu-plugin, present in every site, does what the old per-developer "Cloudflare Tunnel Support" block in
-`wp-config.php` did, for every site and any hostname: when Cloudflare headers are present it takes the public host
-from `X-Forwarded-Host` (or from the share state), rewrites `$_SERVER['HTTP_HOST']`, `SERVER_NAME`, `SERVER_PORT`
-and `HTTPS`, filters `home`/`siteurl` at priority 99 (above a `WP_HOME` constant) and disables canonical redirects.
-Pages, the login form, wp-admin redirects and REST all answer under the public URL, and the `.test` address behaves
-as before. Those wp-config blocks can be deleted.
+`wp-config.php` did, for every site and any hostname: while a site is shared it rewrites `$_SERVER['HTTP_HOST']`,
+`SERVER_NAME`, `SERVER_PORT` and `HTTPS`, filters `home`/`siteurl` at priority 99 (above a `WP_HOME` constant) and
+disables canonical redirects. Pages, the login form, wp-admin redirects and REST all answer under the public URL.
+Those wp-config blocks can be deleted.
+
+While a connected cloudflared tunnel serves a site, that site carries ONE hostname in every context: the tunnel,
+WP-Cron, WP-CLI and anything else built from `home_url()` see the public URL, so a plugin that registers its site
+with a remote service (callback URLs, a site name) registers the public one. The mu-plugin asks cloudflared itself:
+each connector's metrics server (`127.0.0.1:20241`–`20245`) reports whether it is connected and which ingress it is
+serving, so it does not matter who started the tunnel (`devstack share`, or `cloudflared tunnel run <name>` from
+another project's script). A rule that only sits in `config.yml` pins nothing while its tunnel is down: the site is
+back on `https://<site>.test` within 15 seconds of the tunnel stopping, at once when `devstack share --stop` stops it.
+
+While pinned, pages on the `.test` address still load but link to the public host, and wp-admin and the login form
+redirect there, so use the public URL; one-click login opens it. With the tunnel down nothing changes.
 
 ## Backups, archive, restore, clone
 
