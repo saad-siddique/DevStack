@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# wp [args...] : WP-CLI under the PHP of the site you are standing in.
+# Homebrew's wp starts with `#!/usr/bin/env php`, so it always runs the default PHP, whatever a site is isolated on.
+# bootstrap.sh links this file into ~/.local/share/devstack/bin and puts that directory ahead of Homebrew on PATH.
+# The nearest .valetrc at or above the cwd picks the PHP (none: the default). The cwd is left alone, so WP-CLI finds
+# the WordPress root, wp-cli.yml and relative paths exactly as it would on its own.
+
+# Follow the symlink back to the repo (readlink may answer with a relative path).
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+	dir="$(cd "$(dirname "$self")" && pwd)"; self="$(readlink "$self")"
+	case "$self" in /*) ;; *) self="$dir/$self" ;; esac
+done
+BREW_PREFIX="${BREW_PREFIX:-${HOMEBREW_PREFIX:-}}"   # brew shellenv exports it; lib.sh asks brew otherwise
+source "$(cd "$(dirname "$self")/.." && pwd)/bin/lib.sh"
+
+root="$(site_root "$PWD")"
+wp_exec "$(site_php "${root:-$PWD}")" "$@"

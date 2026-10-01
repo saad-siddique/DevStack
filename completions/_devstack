@@ -11,7 +11,7 @@ _devstack() {
 	local -a cmds
 	cmds=(
 		'new:fresh WordPress site' 'import:import a LocalWP export, folder or backup' 'backup:back up a site'
-		'backups:list or prune backups' 'archive:back up then remove a site' 'restore:recreate a site from its backup' 'clone:copy a site under a new name' 'remove:remove a site' 'watchdog:restart nginx/dnsmasq if lost' 'sizes:folder size per site' 'favorite:pin a site to the top' 'cache:object cache per site' 'share:public URL through Cloudflare' 'sites:list linked sites' 'login:open wp-admin signed in' 'php:switch a site PHP version' 'doctor:check the stack' 'uninstall:remove DevStack from this Mac' 'open:open a site or tool in the browser'
+		'backups:list or prune backups' 'archive:back up then remove a site' 'restore:recreate a site from its backup' 'clone:copy a site under a new name' 'remove:remove a site' 'watchdog:restart nginx/dnsmasq if lost' 'sizes:folder size per site' 'favorite:pin a site to the top' 'cache:object cache per site' 'share:public URL through Cloudflare' 'sites:list linked sites' 'login:open wp-admin signed in' 'php:switch a site PHP version' 'wp:WP-CLI for a site under its PHP' 'doctor:check the stack' 'uninstall:remove DevStack from this Mac' 'open:open a site or tool in the browser'
 		'migrate:migrate one MAMP host' 'migrate-all:migrate every non-protected host'
 		'status:stack status JSON' 'service:start/stop/restart a service' 'xdebug:toggle Xdebug per PHP version' 'php-repair:reinstall a PHP version whose extensions fail to load'
 		'logs:tail stack logs' 'logs-prune:rotate logs now'
@@ -20,6 +20,7 @@ _devstack() {
 	if (( CURRENT == 2 )); then _describe 'command' cmds; return; fi
 	case $words[2] in
 		php) (( CURRENT == 3 )) && _devstack_sites || { local -a v; v=( default ${(f)"$(ls "$(_devstack_php_dir)" 2> /dev/null)"} ); _describe 'php version' v; } ;;
+		wp) (( CURRENT == 3 )) && _devstack_sites ;;
 		remove|rm|backup|migrate|login|archive|restore|clone) (( CURRENT == 3 )) && _devstack_sites || _arguments '--yes' '--backup' '--keep-files' '--keep-db' '--db-only' '--files-only' '--user' '--print' '--replace' '--from:dir:_files -/' '--php' '--compress' '--no-compress' '--label' '--json' ;;
 		sizes) _arguments '--refresh' '--json' ;;
 		favorite|fav|star) (( CURRENT == 3 )) && _devstack_sites || { local -a o; o=( on off toggle ); _describe 'state' o; } ;;

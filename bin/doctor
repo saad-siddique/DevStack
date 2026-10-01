@@ -80,6 +80,9 @@ if [ "$expired" -gt 0 ]; then add fail "certificates" "$expired expired" "valet 
 # --- plumbing
 sudo -n -l "$VALET_BIN" > /dev/null 2>&1 && add ok "sudoers" "valet + brew trusted (no password prompts)" || add fail "sudoers" "valet trust missing" "valet trust"
 [ "$(readlink "$BREW_PREFIX/bin/devstack" 2> /dev/null)" = "$REPO_DIR/bin/devstack" ] && add ok "devstack link" "$BREW_PREFIX/bin/devstack -> this repo" || add warn "devstack link" "points elsewhere or missing" "./bootstrap.sh" "$(auto_boot)"
+if [ "$(readlink "$DATA_DIR/bin/wp" 2> /dev/null)" != "$REPO_DIR/shims/wp" ]; then add warn "wp shim" "$DATA_DIR/bin/wp missing (wp runs the default PHP in every site)" "./bootstrap.sh" "$(auto_boot)"
+elif ! grep -qF '.local/share/devstack/bin' "$HOME/.zshrc" 2> /dev/null; then add warn "wp shim" "not on PATH in ~/.zshrc" "./bootstrap.sh, then open a new terminal" "$(auto_boot)"
+else add ok "wp shim" "wp follows each site's PHP"; fi
 for a in logs-prune upgrade watchdog; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh" "$(auto_boot)"; done
 free_gb="$(df -g "$HOME" | awk 'NR==2{print $4}')"
 # Valet runs php-fpm, nginx and dnsmasq as root, and brew services then makes their bin/ root-owned; brew cleanup

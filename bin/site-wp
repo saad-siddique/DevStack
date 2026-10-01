@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# site-wp <name> <wp args...>
+# WP-CLI for one site from any directory, under that site's PHP, plugins and theme loaded. Arguments pass through to
+# WP-CLI untouched (use its --format=json; there is no --json of our own). Inside a site, plain `wp` does the same
+# (shims/wp); wp_site in lib.sh is the core-only variant devstack uses for its own checks.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+[ $# -ge 1 ] || die "usage: site-wp <name> <wp args...>"
+NAME="$1"; shift
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+[ -n "$SITE_PATH" ] && [ -d "$SITE_PATH" ] || die "unknown site '$NAME' (not linked in Valet)"
+wp_exec "$(site_php "$SITE_PATH")" --path="$SITE_PATH" "$@"
