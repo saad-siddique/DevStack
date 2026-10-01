@@ -94,6 +94,23 @@ wp_site() {
 	return "$rc"
 }
 
+# site_root <dir> : the nearest directory at or above <dir> holding a .valetrc; prints nothing when there is none.
+site_root() {
+	local d="$1"
+	while [ -n "$d" ] && [ "/" != "$d" ]; do
+		if [ -f "$d/.valetrc" ]; then printf '%s' "$d"; return 0; fi
+		d="$(dirname "$d")"
+	done
+}
+
+# wp_exec <php formula> <wp args...> : become WP-CLI under that PHP, plugins and theme loaded. Warnings go to stderr
+# (zz-uo-dev.ini has display_errors=On, which in the CLI means stdout), so stdout stays data for pipes and --format=json.
+wp_exec() {
+	local php="$1"
+	shift
+	exec "$(php_bin "$php")" -d display_errors=stderr "$BREW_PREFIX/bin/wp" "$@"
+}
+
 mysql_new()     { "$BREW_PREFIX/opt/mysql@8.4/bin/mysql" -uroot "$@"; }
 mysql_old()     { "$MAMP_MYSQL_BIN/mysql" "${MAMP_MYSQL_ARGS[@]}" "$@" 2> >(grep -v 'Using a password' >&2); }
 mysqldump_old() { "$MAMP_MYSQL_BIN/mysqldump" "${MAMP_MYSQL_ARGS[@]}" "$@" 2> >(grep -v 'Using a password' >&2); }

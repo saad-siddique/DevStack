@@ -21,7 +21,7 @@ valet uninstall --force > /dev/null 2>&1 || log "warning: valet uninstall failed
 log "data services"
 for s in mysql@8.4 mailpit redis memcached; do "$BREW_PREFIX/bin/brew" services stop "$s" > /dev/null 2>&1 || true; done
 log "devstack command"
-rm -f "$BREW_PREFIX/bin/devstack" "$BREW_PREFIX/share/zsh/site-functions/_devstack"
+rm -f "$BREW_PREFIX/bin/devstack" "$BREW_PREFIX/share/zsh/site-functions/_devstack" "$DATA_DIR/bin/wp"
 if [ "1" = "$PURGE" ]; then rm -rf "$DATA_DIR"; log "removed $DATA_DIR"; fi
 cat <<MSG
 
