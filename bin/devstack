@@ -32,6 +32,7 @@ Sites
   devstack sizes [--refresh]                    folder size per site (refresh walks the disk; the nightly run does too)
   devstack favorite <name> [on|off]             pin a site to the top of the Sites list (app and dashboard)
   devstack cache <name> redis|memcached|off     persistent object cache for one site (per-site key prefix)
+  devstack wp <name> <wp args...>               WP-CLI for a site from anywhere, under its PHP (inside a site plain wp does it)
   devstack share <name> [--hostname H]          public URL through Cloudflare (named tunnel from ~/.cloudflared, else quick)
   devstack share --stop [name] | --status       unshare one site, or stop devstack's tunnel; what is public
   devstack php <name> <7.4|8.2|…|default>       switch the PHP version one site runs on
@@ -92,6 +93,7 @@ case "$cmd" in
 	watchdog)            exec "$BIN/watchdog" "$@" ;;
 	login)               exec "$BIN/site-login" "$@" ;;
 	php)                 exec "$BIN/site-php" "$@" ;;
+	wp)                  exec "$BIN/site-wp" "$@" ;;
 	doctor)              exec "$BIN/doctor" "$@" ;;
 	uninstall)           exec "$BIN/uninstall" "$@" ;;
 	sites)               exec "$BIN/stack-status" | jq -r '.sites[] | "\(.name)\t\(.php)\t\(if .secured then "https" else "http" end)\t\(if .protected then "protected" else "" end)"' | column -t -s $'\t' ;;

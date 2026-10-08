@@ -476,6 +476,21 @@ ensure_cli() {
 	ok "$BREW_PREFIX/bin/devstack -> bin/devstack (try: devstack help)"
 }
 
+# `wp` under each site's PHP (shims/wp), ahead of Homebrew's wp on PATH. A symlink, so `git pull` updates it.
+# The PATH line goes last in ~/.zshrc so it lands in front of everything added before it.
+ensure_wp_shim() {
+	log "wp under each site's PHP"
+	local dir="$HOME/.local/share/devstack/bin"
+	local line='export PATH="$HOME/.local/share/devstack/bin:$PATH"'
+	mkdir -p "$dir"
+	ln -sfn "$REPO_DIR/shims/wp" "$dir/wp"
+	if ! grep -qF "$line" "$HOME/.zshrc" 2> /dev/null; then
+		printf '\n# DevStack: wp under each site'"'"'s PHP\n%s\n' "$line" >> "$HOME/.zshrc"
+		ok "added to ~/.zshrc (open a new terminal)"
+	fi
+	ok "$dir/wp -> shims/wp"
+}
+
 ensure_dashboard() {
 	log "Dashboard"
 	if [ ! -L "$VALET_HOME/Sites/dashboard" ]; then
@@ -503,5 +518,6 @@ ensure_stack_upgrades
 ensure_watchdog
 ensure_mu_plugins
 ensure_cli
+ensure_wp_shim
 if [ "1" = "$WITH_APP" ]; then log "Menu-bar app"; "$REPO_DIR/bin/app" install; fi
 log "Done. devstack help lists every command; devstack app install builds the menu-bar app."

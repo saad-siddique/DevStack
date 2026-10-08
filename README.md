@@ -105,7 +105,8 @@ In order, it:
 6. Installs three user LaunchAgents: `com.devstack.logs-prune` rotates logs daily at 04:00, `com.devstack.upgrade`
    checks Homebrew for stack upgrades at 03:30, `com.devstack.watchdog` revives nginx/dnsmasq every five minutes.
 7. Copies the `mu-plugins/` into every site (one-click login, public sharing, local SSL).
-8. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`.
+8. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`, and the
+   `wp` wrapper (`shims/wp`) into `~/.local/share/devstack/bin`, first on PATH, so `wp` follows each site's PHP.
 9. With `--app`: builds `DevStack.app`, installs it into `/Applications` and starts it.
 
 When it finishes, **DevStack.app is in `/Applications` and already running**: look for the stacked-layers DevStack
@@ -224,6 +225,7 @@ devstack new myplugin --php 8.2                  # fresh WordPress at https://my
                                                  # --admin-user/--admin-password/--admin-email say otherwise
                                                  # --php accepts 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (default), 8.5, 8.6
 devstack login myplugin                          # opens wp-admin already signed in (one-time link, 60 s, first admin)
+devstack wp myplugin plugin list                 # WP-CLI for a site from any directory, under its PHP (inside it: plain wp)
 devstack import client ~/Downloads/client.zip    # LocalWP export, any zip/folder with a WordPress root + .sql, or a backup folder
 devstack backup myplugin                         # ~/Backups/DevStack/myplugin/<stamp>/ — see Backups
 devstack backups                                 # list them, newest first
@@ -306,8 +308,12 @@ sites with its built-in drivers.
   `printf 'php=php@7.4\n' > ~/Sites/site/.valetrc && valet isolate php@7.4 --site=site`.
 - php-fpm runs only for the default version and for versions some site isolates. Stop an idle one with
   `devstack service php@8.2 stop` or the switch on the app's PHP tab.
-- `wp` on your PATH is WP-CLI under PHP 8.4. Inside an isolated site use Valet's proxy so it matches the site's
-  version: `valet php /opt/homebrew/bin/wp plugin list`. (`valet composer` does the same for Composer.)
+- `wp` follows the site you are in: from the site root or any folder below it (a plugin you are working on), it
+  runs WP-CLI under the PHP in the nearest `.valetrc`; outside a site it runs the default. Bootstrap links that
+  wrapper (`shims/wp`) into `~/.local/share/devstack/bin` and puts it first on PATH in `~/.zshrc`, so it works in
+  terminals, IDEs and scripts alike, and warnings go to stderr so piped output and `--format=json` stay clean. From
+  anywhere else, `devstack wp <site> plugin list`. (`valet php` alone only reads a `.valetrc` in the exact folder you
+  are in, not in parent folders. `valet composer` has the same limit for Composer.)
 - Xdebug is installed for every version and off by default because it costs speed. The Xdebug checkbox on the app's
   PHP tab, or `devstack xdebug on --php 8.4`, turns it on in trigger mode (port 9003, restarts that php-fpm); start a session with the `XDEBUG_TRIGGER=1` cookie,
   a browser helper extension, or `XDEBUG_TRIGGER=1 wp …`. No path mappings are needed, everything is local.
