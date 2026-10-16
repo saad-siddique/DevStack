@@ -11,7 +11,7 @@ services="$( { sudo -n brew services list --json 2> /dev/null || echo '[]'; brew
 # sites = isolated sites on that version (default version gets the non-isolated sites); xdebug = ini present.
 default_sock="$(readlink "$VALET_HOME/valet.sock" 2> /dev/null | /usr/bin/grep -oE 'valet[0-9]+\.sock' || true)"
 n_linked="$(ls "$VALET_HOME/Sites" 2> /dev/null | wc -l | tr -d ' ')"
-n_isolated_total="$(/usr/bin/grep -lE 'valet[0-9]+\.sock' "$VALET_HOME"/Nginx/* 2> /dev/null | wc -l | tr -d ' ')"
+n_isolated_total="$(/usr/bin/grep -lE 'valet[0-9]+\.sock' "$VALET_HOME"/Nginx/* 2> /dev/null | wc -l | tr -d ' ' || true)"
 php_json="$(for d in "$BREW_PREFIX"/etc/php/*/; do
 	[ -d "$d/conf.d" ] || continue
 	v="$(basename "$d")"; sock="valet${v/./}.sock"
@@ -20,7 +20,7 @@ php_json="$(for d in "$BREW_PREFIX"/etc/php/*/; do
 	full="$("$BREW_PREFIX/opt/$formula/bin/php" -r 'echo "\n", PHP_VERSION;' 2> /dev/null | tail -1 || true)"
 	broken="$(php_broken_ext "$BREW_PREFIX/opt/$formula/bin/php" | paste -sd, -)"
 	is_default=false; [ "$sock" = "$default_sock" ] && is_default=true
-	iso="$(/usr/bin/grep -l "$sock" "$VALET_HOME"/Nginx/* 2> /dev/null | wc -l | tr -d ' ')"
+	iso="$(/usr/bin/grep -l "$sock" "$VALET_HOME"/Nginx/* 2> /dev/null | wc -l | tr -d ' ' || true)"
 	if [ "true" = "$is_default" ]; then sites=$(( n_linked - n_isolated_total )); else sites="$iso"; fi
 	xd=false; [ -f "$d/conf.d/20-xdebug.ini" ] && xd=true
 	fpm="$(echo "$services" | jq -r --arg f "$formula" '.[] | select(.name == $f) | .status' | head -1)"
