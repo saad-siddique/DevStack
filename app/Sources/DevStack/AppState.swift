@@ -207,9 +207,9 @@ final class AppState: ObservableObject {
 		if let st = status {
 			let h = st.health
 			if lastHealth == .ok, h == .down || h == .degraded {
-				let down = st.coreServices.filter { !$0.isRunning }.map(\.name)
-				notify(h == .down ? "DevStack: a core service is down" : "DevStack: stack degraded",
-				       down.isEmpty ? "launchd reports an error. Open DevStack for details." : "\(down.joined(separator: ", ")) not running.")
+				let down = st.problems
+				notify(h == .down ? "DevStack: the stack is down" : "DevStack: stack degraded",
+				       down.isEmpty ? "launchd reports an error. Open DevStack for details." : "\(down.joined(separator: ", ")) not running. Restart stack from the panel.")
 			}
 			lastHealth = h
 			let runAt = st.upgrades?.lastRun?.at
@@ -283,6 +283,8 @@ final class AppState: ObservableObject {
 	}
 
 	func runDoctor() { runJob(title: "Doctor", ["doctor"]) }
+	/// Every service in order (what sites need is started even when stopped or failing), then a check that a site answers.
+	func restartStack() { runJob(title: "Restart stack", ["restart"]) }
 	func clone(_ site: Site, as name: String, php: String?) {
 		var args = ["clone", site.name, name, "--json"]
 		if let php, !php.isEmpty { args += ["--php", php] }
@@ -314,7 +316,7 @@ final class AppState: ObservableObject {
 
 	/// The php-fpm a site needs is not running: the site answers 502 until it is started.
 	func fpmProblem(for site: Site) -> String? {
-		guard site.php != "default", let st = status, let p = st.php.first(where: { $0.version == site.php }) else { return nil }
+		guard let st = status, let p = site.php == "default" ? st.defaultPhp : st.php.first(where: { $0.version == site.php }) else { return nil }
 		return p.fpmRunning ? nil : p.version
 	}
 
@@ -346,6 +348,7 @@ final class AppState: ObservableObject {
 	func restart(_ s: Service) async { await quick(s.name, ["service", s.name, "restart"], label: "\(s.name) restarted") }
 	func toggleXdebug(_ p: PhpVersion) async { await quick("php@\(p.version)", ["xdebug", p.xdebug ? "off" : "on", "--php", p.version], label: "Xdebug \(p.xdebug ? "off" : "on") for PHP \(p.version)") }
 	func toggleFpm(_ p: PhpVersion) async { await quick("php@\(p.version)", ["service", "php@\(p.version)", p.fpmRunning ? "stop" : "start"], label: "php-fpm \(p.version) \(p.fpmRunning ? "stopped" : "started")") }
+	func restartFpm(_ p: PhpVersion) async { await quick("php@\(p.version)", ["service", "php@\(p.version)", "restart"], label: "php-fpm \(p.version) restarted") }
 
 	func isBusy(_ key: String) -> Bool { busy.contains(key) }
 

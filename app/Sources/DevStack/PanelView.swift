@@ -17,6 +17,9 @@ struct PanelView: View {
 			hero
 			VStack(spacing: 10) {
 				if let msg = state.errorMessage { ErrorLine(message: msg) { state.errorMessage = nil } }
+				if let st = state.status, st.health == .down || st.health == .degraded, !st.problems.isEmpty {
+					StackDownLine(problems: st.problems, down: st.health == .down, busy: state.task.running) { state.restartStack() }
+				}
 				if let u = state.update, u.isAvailable { UpdateLine(info: u) { state.runUpdate() } }
 				if !state.runaways.isEmpty {
 					RunawayLine(runaways: state.runaways, restart: { svc in Task { await state.restartService(named: svc) } }, busy: { state.isBusy($0) })
@@ -104,6 +107,7 @@ struct PanelView: View {
 				Button("Open dashboard") { state.open("https://dashboard.test") }
 				Button("Backups…") { present(.backups(nil)) }
 				Button("Run doctor") { present(.task); state.runDoctor() }
+				Button("Restart stack") { state.restartStack() }.disabled(state.task.running)
 				Divider()
 				Button("Open repo folder") { state.openRepo() }
 				Button("Open Sites folder") { state.openFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Sites").path) }
@@ -385,7 +389,7 @@ struct ServiceRow: View {
 			StatusDot(kind: busy ? .busy : (service.isError ? .error : (service.isRunning ? .on : .off)))
 		} trailing: {
 			Button { Task { await state.restart(service) } } label: { Image(systemName: "arrow.clockwise").font(.system(size: 12)) }
-				.buttonStyle(.plain).foregroundStyle(Theme(scheme).muted).help("Restart \(service.name)").disabled(busy || !service.isRunning)
+				.buttonStyle(.plain).foregroundStyle(Theme(scheme).muted).help("Restart \(service.name)").disabled(busy || !(service.isRunning || service.isError))
 			Toggle("", isOn: Binding(get: { service.isRunning }, set: { _ in Task { await state.toggle(service) } }))
 				.toggleStyle(.switch).controlSize(.mini).labelsHidden().disabled(busy)
 		}
@@ -408,23 +412,26 @@ struct PhpView: View {
 
 struct PhpRow: View {
 	@EnvironmentObject private var state: AppState
+	@Environment(\.colorScheme) private var scheme
 	let php: PhpVersion
 
 	private var broken: [String] { php.brokenExt ?? [] }
+	/// Sites run on it: restartable even while it is down, which is exactly when it is needed.
+	private var needed: Bool { php.isDefault || php.sites > 0 }
 
 	private var subtitle: String {
 		if !broken.isEmpty { return "\(broken.joined(separator: ", ")) \(broken.count == 1 ? "fails" : "fail") to load" }
 		var parts: [String] = [php.full]
 		if php.isDefault { parts.append("default") }
 		parts.append(php.sites == 1 ? "1 site" : "\(php.sites) sites")
-		parts.append(php.fpmRunning ? "fpm running" : "fpm off")
+		parts.append(php.fpmRunning ? "fpm running" : (php.fpmError ? "fpm failing" : "fpm off"))
 		return parts.joined(separator: "  ·  ")
 	}
 
 	var body: some View {
 		let busy = state.isBusy("php@\(php.version)")
 		Row(title: "PHP \(php.version)", subtitle: subtitle) {
-			StatusDot(kind: busy ? .busy : (!broken.isEmpty ? .error : (php.fpmRunning ? .on : .off)))
+			StatusDot(kind: busy ? .busy : (!broken.isEmpty || php.fpmError ? .error : (php.fpmRunning ? .on : .off)))
 		} trailing: {
 			if !broken.isEmpty {
 				Button("Repair") { state.repairPhp(php.version) }.controlSize(.small).disabled(busy)
@@ -433,9 +440,14 @@ struct PhpRow: View {
 			Toggle("Xdebug", isOn: Binding(get: { php.xdebug }, set: { _ in Task { await state.toggleXdebug(php) } }))
 				.toggleStyle(.checkbox).controlSize(.small).disabled(busy)
 				.help("Xdebug in trigger mode on port 9003 (restarts php-fpm \(php.version))")
+			Button { Task { await state.restartFpm(php) } } label: { Image(systemName: "arrow.clockwise").font(.system(size: 12)) }
+				.buttonStyle(.plain).foregroundStyle(Theme(scheme).muted).help("Restart php-fpm \(php.version)")
+				.disabled(busy || !(php.fpmRunning || php.fpmError || needed))
+			// The default version cannot be switched off, but it can be switched back on when it is down.
 			Toggle("", isOn: Binding(get: { php.fpmRunning }, set: { _ in Task { await state.toggleFpm(php) } }))
-				.toggleStyle(.switch).controlSize(.mini).labelsHidden().disabled(busy || php.isDefault)
-				.help(php.isDefault ? "The default version always runs" : (php.fpmRunning ? "Stop php-fpm \(php.version)" : "Start php-fpm \(php.version)"))
+				.toggleStyle(.switch).controlSize(.mini).labelsHidden().disabled(busy || (php.isDefault && php.fpmRunning))
+				.help(php.isDefault ? (php.fpmRunning ? "The default version always runs" : "Start php-fpm \(php.version): every site on the default PHP is down")
+				      : (php.fpmRunning ? "Stop php-fpm \(php.version)" : "Start php-fpm \(php.version)"))
 		}
 	}
 }

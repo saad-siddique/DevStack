@@ -17,6 +17,7 @@ formula="php@$V"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"   # the ne
 exts=(); while IFS= read -r f; do exts+=("$f"); done < <("$BREW_PREFIX/bin/brew" list --formula --full-name | grep -E "/[^/]+@$V\$" | grep -v "/php@$V\$" || true)
 log "php@$V: $broken fail to load; reinstalling $formula ${exts[*]+${exts[*]}}"
 HOMEBREW_NO_AUTO_UPDATE=1 "$BREW_PREFIX/bin/brew" reinstall "$formula" ${exts[@]+"${exts[@]}"} < /dev/null > /dev/null 2> >(grep -E '^Error' >&2) || true
+fpm_disable_www_pools > /dev/null   # the reinstall puts back Homebrew's [www] pool on port 9000 (see lib.sh)
 
 broken="$(php_broken_ext "$bin" | paste -sd' ' -)"
 [ -z "$broken" ] || die "php@$V: $broken still fail to load; see brew info $formula"

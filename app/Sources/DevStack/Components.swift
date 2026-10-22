@@ -86,6 +86,28 @@ struct ReportsLine: View {
 	}
 }
 
+/// Something sites need is not running: say what, and offer the one button that brings the whole stack back.
+struct StackDownLine: View {
+	let problems: [String]
+	let down: Bool
+	let busy: Bool
+	let restart: () -> Void
+
+	var body: some View {
+		HStack(alignment: .firstTextBaseline, spacing: 6) {
+			Image(systemName: down ? "xmark.octagon.fill" : "exclamationmark.triangle.fill").foregroundStyle(down ? Color.red : Color.orange)
+			VStack(alignment: .leading, spacing: 1) {
+				Text(down ? "The stack is down" : "Part of the stack is down").font(.caption.weight(.medium))
+				Text("\(problems.joined(separator: ", ")) not running.").font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+			}
+			Spacer(minLength: 6)
+			Button("Restart stack", action: restart).controlSize(.small).disabled(busy)
+				.help("Restart every service in order, start what sites need, then check that a site answers")
+		}
+		.notice(down ? Color.red : Color.orange)
+	}
+}
+
 /// A stack process hot for more than a minute (or holding gigabytes): name it and offer the restart.
 struct RunawayLine: View {
 	let runaways: [UsageSampler.Runaway]

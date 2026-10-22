@@ -178,6 +178,9 @@ ensure_php_ini() {
 ensure_fpm_pool() {
 	log "php-fpm pool drop-ins"
 	local v dst changed=()
+	# Installing or upgrading a PHP puts back Homebrew's [www] pool on port 9000, which blocks every other php-fpm.
+	# shellcheck source=bin/lib.sh
+	while IFS= read -r v; do [ -n "$v" ] && { changed+=("$v"); ok "disabled Homebrew's www pool (port 9000) for PHP $v"; }; done < <(source "$REPO_DIR/bin/lib.sh"; fpm_disable_www_pools)
 	for v in "${PHP_VERSIONS[@]}"; do
 		dst="$BREW_PREFIX/etc/php/$v/php-fpm.d/zz-devstack.conf"
 		[ -d "$(dirname "$dst")" ] || continue
@@ -186,7 +189,7 @@ ensure_fpm_pool() {
 		else ok "up to date: $dst"; fi
 	done
 	mkdir -p "$VALET_HOME/Log"
-	for v in "${changed[@]+"${changed[@]}"}"; do
+	for v in $(printf '%s\n' "${changed[@]+"${changed[@]}"}" | sort -u); do
 		local formula="php@$v"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"
 		if sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null | jq -e --arg n "$formula" '.[] | select(.name == $n and .status == "started")' > /dev/null; then
 			"$REPO_DIR/bin/service" "php@$v" restart > /dev/null 2>&1 && ok "restarted php-fpm $v" || warn "could not restart php-fpm $v"

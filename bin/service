@@ -26,8 +26,17 @@ brew_services() {
 	if is_root_domain "$NAME"; then sudo -n "$BREW_PREFIX/bin/brew" services "$@"; else "$BREW_PREFIX/bin/brew" services "$@"; fi
 }
 
+current_status() {
+	services_json | jq -c --arg n "$FORMULA" --arg shown "$NAME" '(map(select(.name == $n)) | first // {name:$n,status:"unknown",user:null}) | {name:$shown, status, user}'
+}
+
 if [ "status" != "$OP" ]; then
-	if ! brew_services "$OP" "$FORMULA" > /dev/null 2>&1; then
+	# Any version's stray [www] pool on 127.0.0.1:9000 keeps the others from starting (lib.sh fpm_disable_www_pools).
+	case "$NAME" in php@*) if [ "stop" != "$OP" ]; then fixed="$(fpm_disable_www_pools)"; [ -z "$fixed" ] || log "disabled Homebrew's www pool (port 9000) for PHP $(paste -sd' ' - <<<"$fixed")"; fi ;; esac
+	# launchd keeps a job loaded while it dies at every start ("error"); `brew services start` leaves such a job as it is.
+	brew_op="$OP"
+	if [ "start" = "$OP" ]; then case "$(jq -r .status <<<"$(current_status)")" in started|none|unknown) ;; *) brew_op=restart ;; esac; fi
+	if ! brew_services "$brew_op" "$FORMULA" > /dev/null 2>&1; then
 		hint=""
 		case "$NAME" in
 			redis) o="$(lsof -nP -iTCP:6379 -sTCP:LISTEN 2> /dev/null | awk 'NR==2{print $1}' || true)"; [ -n "$o" ] && hint=" (port 6379 is held by $o — a Docker container?)" ;;
@@ -37,10 +46,6 @@ if [ "status" != "$OP" ]; then
 	fi
 fi
 
-current_status() {
-	{ sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; } \
-		| jq -s -c --arg n "$FORMULA" --arg shown "$NAME" 'add | map(select(.name == $n)) | (max_by(if .status == "started" then 1 else 0 end) // {name:$n,status:"unknown",user:null}) | {name:$shown, status, user}'
-}
 status_json="$(current_status)"
 # launchd reports "error" while the old process is still shutting down (MySQL takes ~10 s), so wait for "started".
 if [ "start" = "$OP" ] || [ "restart" = "$OP" ]; then
@@ -49,5 +54,23 @@ if [ "start" = "$OP" ] || [ "restart" = "$OP" ]; then
 		sleep 1
 		status_json="$(current_status)"
 	done
+	# "started" only means launchd has a pid: php-fpm and nginx die at init a moment later on a bad pool or a taken
+	# port, so look once more after they have had time to.
+	if [ "started" = "$(jq -r .status <<<"$status_json")" ]; then sleep 2; status_json="$(current_status)"; fi
 fi
 if [ "1" = "$JSON" ]; then echo "$status_json"; else echo "$status_json" | jq -r '"\(.name): \(.status)\(if .user then " (" + .user + ")" else "" end)"'; fi
+if [ "start" = "$OP" ] || [ "restart" = "$OP" ]; then
+	st="$(jq -r .status <<<"$status_json")"
+	if [ "started" != "$st" ]; then
+		# php-fpm says why it would not start in the shared log ("unable to bind listening socket …"), just before
+		# its generic closing lines.
+		why=""; src=""
+		case "$NAME" in
+			php@*) src=php-fpm
+			       why="$(tail -n 50 "$BREW_PREFIX/var/log/php-fpm.log" 2> /dev/null | LC_ALL=C /usr/bin/grep -E '(ERROR|ALERT): ' \
+			              | LC_ALL=C /usr/bin/grep -vE 'FPM initialization failed|failed to post process the configuration' | tail -1 | sed -E 's/^\[[^]]*\] [A-Z]+: //' || true)" ;;
+			mysql@*) src=mysql ;; nginx|redis|mailpit) src="$NAME" ;;
+		esac
+		die "$NAME is $st after $OP${why:+: $why}${src:+ (devstack logs $src)}"
+	fi
+fi

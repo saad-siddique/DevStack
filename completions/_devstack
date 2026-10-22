@@ -13,7 +13,7 @@ _devstack() {
 		'new:fresh WordPress site' 'import:import a LocalWP export, folder or backup' 'backup:back up a site'
 		'backups:list or prune backups' 'archive:back up then remove a site' 'restore:recreate a site from its backup' 'clone:copy a site under a new name' 'remove:remove a site' 'watchdog:restart nginx/dnsmasq if lost' 'sizes:folder size per site' 'favorite:pin a site to the top' 'cache:object cache per site' 'share:public URL through Cloudflare' 'sites:list linked sites' 'login:open wp-admin signed in' 'php:switch a site PHP version' 'wp:WP-CLI for a site under its PHP' 'doctor:check the stack' 'uninstall:remove DevStack from this Mac' 'open:open a site or tool in the browser'
 		'migrate:migrate one MAMP host' 'migrate-all:migrate every non-protected host'
-		'status:stack status JSON' 'service:start/stop/restart a service' 'xdebug:toggle Xdebug per PHP version' 'php-repair:reinstall a PHP version whose extensions fail to load'
+		'status:stack status JSON' 'restart:restart the whole stack' 'service:start/stop/restart a service' 'xdebug:toggle Xdebug per PHP version' 'php-repair:reinstall a PHP version whose extensions fail to load'
 		'logs:tail stack logs' 'logs-prune:rotate logs now'
 		'bootstrap:(re)install the stack' 'update:git pull + bootstrap' 'upgrade:Homebrew upgrades of the stack' 'app:menu-bar app' 'path:print repo dir' 'help:usage'
 	)
@@ -44,6 +44,7 @@ _devstack() {
 		bootstrap) _arguments '--app' ;;
 		update) _arguments '--check' '--app' '--json' ;;
 		doctor) _arguments '--fix' '--json' ;;
+		restart) _arguments '--json' ;;
 		uninstall) _arguments '--yes' '--purge' ;;
 		upgrade) _arguments '--check' '--auto' '--all' '--nightly' '--set-auto:mode:(off patch all)' '--json' ;;
 	esac

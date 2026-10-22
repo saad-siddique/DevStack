@@ -45,6 +45,35 @@ wait_for_site() {
 	log "warning: $1 still answering $code after 15s"
 }
 
+# services_json : every brew service from both launchd domains (Valet runs nginx/dnsmasq/php-fpm as root, the rest
+# run as the user), one entry per name. A formula is listed in both domains, loaded in one and "none" in the other,
+# so keep the state that says the most: started, then error (loaded but dying), then any other loaded state, then none.
+services_json() {
+	{ sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]'; } \
+		| jq -s -c 'add | group_by(.name) | map(max_by((.status // "none") as $s
+			| if "started" == $s then 3 elif ($s | startswith("error")) then 2 elif "none" == $s then 0 else 1 end))'
+}
+
+# fpm_disable_www_pools : Homebrew's PHP formula installs php-fpm.d/www.conf (a [www] pool on 127.0.0.1:9000) whenever
+# that file is missing, so every `brew upgrade` or `reinstall` of a PHP puts back the pool Valet renamed to
+# www.conf-backup. The first php-fpm to start then holds port 9000 and every other version dies at startup ("FPM
+# initialization failed"), taking its Valet socket with it: 502 for every site on that version. Where Valet owns the
+# pools (valet-fpm.conf present) rename it again, as Valet does, and print each version changed. php-fpm reads its
+# pools at start, so a running one keeps the old pool until restarted.
+fpm_disable_www_pools() {
+	local d
+	for d in "$BREW_PREFIX"/etc/php/*/php-fpm.d; do
+		[ -f "$d/www.conf" ] && [ -f "$d/valet-fpm.conf" ] || continue
+		if mv -f "$d/www.conf" "$d/www.conf-backup" 2> /dev/null; then basename "$(dirname "$d")"; else log "warning: could not rename $d/www.conf"; fi
+	done
+}
+
+# php_versions_in_use : X.Y of every PHP a site runs on, one per line: the default (valet.sock) and each isolated one.
+php_versions_in_use() {
+	{ readlink "$VALET_HOME/valet.sock" 2> /dev/null || true; /usr/bin/grep -ohE 'valet[0-9]+\.sock' "$VALET_HOME"/Nginx/* 2> /dev/null || true; } \
+		| { /usr/bin/grep -oE 'valet[0-9]+\.sock' || true; } | sed -E 's/valet([0-9])([0-9]+)\.sock/\1.\2/' | sort -u
+}
+
 # site_row <host> : load one inventory row into SITE_* variables.
 site_row() {
 	local row

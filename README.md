@@ -123,9 +123,11 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 **The panel**, top to bottom:
 
 - Header: how many services are online, how many sites, the default PHP version; a refresh button and the ⋯ menu
-  (dashboard, Backups…, Run doctor, repo and Sites folders, Start at login, Notifications, the menu-bar load graph,
-  Check for updates, Quit).
-- Notices, when there are any: **Update available** for this repo; a **runaway** line when a stack process has sat above 120% CPU for 90 seconds or holds
+  (dashboard, Backups…, Run doctor, Restart stack, repo and Sites folders, Start at login, Notifications, the menu-bar
+  load graph, Check for updates, Quit).
+- Notices, when there are any: **The stack is down** when something sites need is not running (nginx, dnsmasq,
+  MySQL, the default PHP or a PHP a site is isolated on), naming it, with a **Restart stack** button;
+  **Update available** for this repo; a **runaway** line when a stack process has sat above 120% CPU for 90 seconds or holds
   more than 3 GB, with a Restart button; and a **reports** line when macOS wrote a crash or resource report for a
   stack process in the last 24 hours (Open shows it in Console).
 - macOS notifications (allow them once when asked; mute with *Notifications* in the ⋯ menu): every service start,
@@ -175,10 +177,11 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Repair a PHP version | PHP tab → **Repair**, shown when an extension fails to load (Homebrew rebuilt PHP or the extension on its own). Reinstalls that PHP and its extensions. |
 | Start/stop a service | Services tab → switch. Restart with the arrow. |
 | Switch Xdebug on or off | PHP tab → Xdebug checkbox on that version. |
-| Stop an idle PHP version | PHP tab → switch (the default version stays on). |
+| Stop an idle PHP version | PHP tab → switch (the default version cannot be switched off, only back on). Restart with the arrow. |
 | Change a site's PHP version | ⋯ → PHP version → pick one. Writes `.valetrc`, isolates the site, starts that php-fpm. |
 | Open a site in your editor or terminal | ⋯ → Open in VS Code / Cursor / PhpStorm / Terminal (whatever is installed). |
 | Check the whole stack | ⋯ → Run doctor. Every check with its fix, in the task window. |
+| Restart the whole stack | ⋯ menu → Restart stack, or the button on the "stack is down" notice. Restarts every service in order (what sites need is started even when stopped or failing; a service you switched off stays off), then checks that a site answers. |
 | See what went wrong | Every long task streams its log into the task window; *Copy log* copies it. Stack logs are on the dashboard's Logs tab. |
 
 ![New site](docs/img/new-site.png) ![Task log](docs/img/task.png)
@@ -237,6 +240,7 @@ devstack share myplugin | --stop [myplugin]      # public URL through Cloudflare
 devstack cache myplugin redis|memcached|off      # persistent object cache for one site (per-site key prefix, shared servers)
 devstack backup myplugin --db-only --label "x"   # database save point; devstack restore myplugin --db-only rolls back to the newest
 devstack doctor --fix                            # start what is stopped, re-run bootstrap for gaps, check again
+devstack restart                                 # the whole stack, in order: brings back what sites need, then checks a site answers
 devstack uninstall --yes [--purge]               # remove DevStack (sites, databases, backups stay)
 devstack restore myplugin [--replace]            # bring it back exactly as it was (same URL, PHP, database, logins)
 devstack clone myplugin myplugin-copy            # a copy under a new name: own database, URLs rewritten
@@ -440,9 +444,14 @@ What keeps a bad plugin, a stuck request or a forgotten service from ruining the
   and in `devstack doctor`. macOS files a disk-writes report once a process writes about 2 GB in a day, which MySQL
   does routinely behind a PHPUnit suite (each test rolls back, and `TRUNCATE` recreates the table file). Reports
   under 256 KB/s stay in `devstack logs crashes`, marked routine, and raise no notice.
+- **Homebrew's `www` pool**: every `brew upgrade` or `reinstall` of a PHP puts back `php-fpm.d/www.conf`, a pool on
+  `127.0.0.1:9000`. The first php-fpm to start takes the port and every other version dies at startup, so all their
+  sites answer 502. `fpm_disable_www_pools` in `bin/lib.sh` renames it to `www.conf-backup`, as Valet does, wherever
+  Valet owns the pools: `stack-upgrade`, `php-repair`, `bootstrap`, `devstack service php@…` and `devstack restart`
+  run it before they start PHP, and the watchdog runs it every five minutes for upgrades made by hand.
 - **`devstack doctor`**: DNS resolver and dnsmasq, nginx and its config, ports 80/443 and which program holds them (by
-  path, so LocalWP's router nginx is caught), php-fpm per version against the sites that need it, PHP extensions that
-  fail to load, MySQL, Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet signs sites for a year),
+  path, so LocalWP's router nginx is caught), php-fpm per version against the sites that need it, Homebrew's `www`
+  pool, PHP extensions that fail to load, MySQL, Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet signs sites for a year),
   sudoers trust, the devstack link, the three LaunchAgents, free disk, old root-owned PHP builds Homebrew cannot clean,
   backup size, the stray wp-config trap, recent reports. Every finding comes with the command that fixes it. Exit 1
   when something is red.
@@ -550,6 +559,14 @@ docs/                 migrating-from-mamp.md, screenshots (docs/img); docs/priva
   upgrade `brew cleanup` cannot delete the old build (about 100 MB each); `doctor` lists them with the `sudo rm -rf`
   line to run.
 - `brew upgrade` reads stdin. Inside a `while read` loop it swallowed the rest of the list; give it `< /dev/null`.
+- Homebrew installs `etc/php/<v>/php-fpm.d/www.conf` whenever it is missing, and Valet renames it away, so every PHP
+  upgrade brings it back: after the 21 October upgrade PHP 7.4 restarted first, took port 9000, and PHP 8.4 (the
+  default, every site) failed "unable to bind listening socket" every ten seconds until morning. See Guards.
+- `brew services list` reports each formula twice when Valet runs it as root: loaded ("error", exit 78) in the root
+  domain and "none" in the user's. Merging the two on "started or not" hid a dying php-fpm as merely off;
+  `services_json` in `bin/lib.sh` keeps started, then error, then any other loaded state. And launchd says "started"
+  the moment it has a pid, before php-fpm has read its pools, so `bin/service` looks again two seconds later and
+  exits 1 with php-fpm's own reason when it did not stay up.
 - A Mac migrated from Intel with Migration Assistant, or a Terminal with "Open using Rosetta" ticked, reports
   `x86_64` on an M-series chip and carries an Intel Homebrew in `/usr/local`. Homebrew then says "Tier 3", has no
   bottles, and builds PHP from source until the missing Command Line Tools make it fail. Bootstrap checks

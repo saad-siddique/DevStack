@@ -44,6 +44,17 @@ enum Snapshot {
 		NSApp.appearance = NSAppearance(named: .darkAqua)
 		await capture(PanelView().environmentObject(state), "panel-upgrades-dark", dir)
 		NSApp.appearance = NSAppearance(named: .aqua)
+		// The default PHP dying at startup: the notice with Restart stack, warning tiles on its sites, the PHP tab.
+		var down = fixture
+		down.php = down.php.map { p in
+			p.isDefault ? PhpVersion(version: p.version, full: p.full, formula: p.formula, fpm: "error", isDefault: true, sites: p.sites, xdebug: p.xdebug, brokenExt: nil) : p
+		}
+		down.services = down.services.map { $0.name == "php@8.4" ? Service(name: $0.name, status: "error", user: $0.user) : $0 }
+		state.freeze(with: down)
+		UserDefaults.standard.set("Sites", forKey: "panel.tab")
+		await capture(PanelView().environmentObject(state), "panel-down", dir)
+		UserDefaults.standard.set("PHP", forKey: "panel.tab")
+		await capture(PanelView().environmentObject(state), "panel-down-php", dir)
 		UserDefaults.standard.set(tab ?? "Sites", forKey: "panel.tab")
 		state.freeze(with: fixture)
 		state.setBackups([

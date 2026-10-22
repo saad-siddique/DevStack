@@ -3,9 +3,14 @@
 # KeepAlive, so a crashed nginx (or dnsmasq) stays down until someone notices; this restarts a root-domain service
 # that launchd still has loaded but which is not running. A service the developer stopped is unloaded (status
 # "none") and is left alone. Writes $DATA_DIR/watchdog.json for stack-status, the app and the dashboard.
+# It also disables the [www] pool a `brew upgrade` of PHP puts back (lib.sh fpm_disable_www_pools); launchd retries
+# the php-fpm that pool kept from starting every ten seconds, so that version comes back by itself.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 JSON=0; [ "${1:-}" = "--json" ] && JSON=1
 STATE="$DATA_DIR/watchdog.json"; mkdir -p "$DATA_DIR" "$LOG_DIR"
+
+fixed="$(fpm_disable_www_pools)"
+[ -z "$fixed" ] || printf '%s watchdog: disabled Homebrew'"'"'s www pool (port 9000) for PHP %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(paste -sd' ' - <<<"$fixed")" >> "$LOG_DIR/watchdog.log"
 
 services="$(sudo -n "$BREW_PREFIX/bin/brew" services list --json 2> /dev/null || echo '[]')"
 actions='[]'

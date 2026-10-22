@@ -2,10 +2,8 @@
 # stack-status : one JSON blob describing the local stack (polled by the future menu-bar app).
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-# Valet runs nginx/dnsmasq/php-fpm as root; mysql/mailpit run as the user. Merge both service domains.
-services="$( { sudo -n brew services list --json 2> /dev/null || echo '[]'; brew services list --json 2> /dev/null || echo '[]'; } \
-	| jq -s 'add | map(select(.name | test("^(nginx|dnsmasq|php(@[0-9.]+)?|mysql@8.4|mailpit|redis|memcached)$")))
-	         | group_by(.name) | map(max_by(if .status == "started" then 1 else 0 end)) | map({name, status, user})')"
+# Valet runs nginx/dnsmasq/php-fpm as root; mysql/mailpit run as the user. Merge both service domains (lib.sh).
+services="$(services_json | jq 'map(select(.name | test("^(nginx|dnsmasq|php(@[0-9.]+)?|mysql@8.4|mailpit|redis|memcached)$"))) | map({name, status, user})')"
 
 # PHP: one entry per installed version. fpm = brew service state; default = the version behind valet.sock;
 # sites = isolated sites on that version (default version gets the non-isolated sites); xdebug = ini present.

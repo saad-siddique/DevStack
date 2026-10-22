@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# stack-restart [--json] : restart the whole stack, in dependency order, and check that a site answers.
+# What sites need is (re)started whatever its state, stopped or failing: dnsmasq, mysql@8.4, php-fpm for the default
+# PHP and every version a site is isolated on, and nginx last. The rest (mailpit, redis, memcached, php-fpm with no
+# site) is restarted only while launchd has it loaded, so a switch the developer turned off stays off. Homebrew's
+# [www] pool is disabled first (lib.sh fpm_disable_www_pools): left in place it lets one PHP start and no other.
+# Exit 1 when a service does not come back or the dashboard still answers with a gateway error.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+JSON=0
+for arg in "$@"; do case "$arg" in --json) JSON=1 ;; *) die "usage: stack-restart [--json]" ;; esac; done
+
+log "=== stack-restart"
+fixed="$(fpm_disable_www_pools)"
+[ -z "$fixed" ] || log "disabled Homebrew's www pool (port 9000) for PHP $(paste -sd' ' - <<<"$fixed")"
+
+services="$(services_json)"
+loaded() { jq -e --arg n "$1" 'map(select(.name == $n and "none" != (.status // "none"))) | length > 0' <<<"$services" > /dev/null; }
+in_use="$(php_versions_in_use)"
+
+# plan: one "<service> <required|optional>" per line, in restart order.
+plan="$(
+	echo "dnsmasq required"; echo "mysql@8.4 required"
+	for s in redis memcached mailpit; do loaded "$s" && echo "$s optional"; done
+	for d in "$BREW_PREFIX"/etc/php/*/; do
+		[ -d "$d/conf.d" ] || continue
+		v="$(basename "$d")"; formula="php@$v"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"
+		if /usr/bin/grep -qx -- "$v" <<<"$in_use"; then echo "php@$v required"; elif loaded "$formula"; then echo "php@$v optional"; fi
+	done
+	echo "nginx required"
+)"
+
+results='[]'; failed=0
+errf="$(mktemp -t devstack-restart)"; trap 'rm -f "$errf"' EXIT
+while read -r svc need; do
+	[ -n "$svc" ] || continue
+	log "restart $svc ($need)"
+	# bin/service waits for "started" and exits 1 (with php-fpm's own reason) when it does not get there.
+	# < /dev/null: brew reads stdin and would swallow the rest of the plan.
+	if out="$("$REPO_DIR/bin/service" "$svc" restart --json < /dev/null 2> "$errf")"; then ok=true; err=""
+	else ok=false; failed=$((failed + 1)); err="$(tail -1 "$errf" | sed -E 's/^[0-9:]+ (ERROR: )?//')"; log "warning: $err"; fi
+	st="$(jq -r '.status // empty' <<<"$out" 2> /dev/null || true)"
+	results="$(jq -c --arg n "$svc" --arg need "$need" --arg st "${st:-unknown}" --argjson ok "$ok" --arg err "$err" \
+		'. + [{name:$n, required:("required" == $need), status:$st, ok:$ok, error:(if "" == $err then null else $err end)}]' <<<"$results")"
+done <<<"$plan"
+
+# nginx and php-fpm are up when launchd says so; the dashboard answering proves the path from nginx to PHP works.
+code="$(/usr/bin/curl -4 -s -o /dev/null -m 10 -w '%{http_code}' "https://dashboard.$TLD/" || true)"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	case "$code" in 000|502|503|504) sleep 1; code="$(/usr/bin/curl -4 -s -o /dev/null -m 10 -w '%{http_code}' "https://dashboard.$TLD/" || true)" ;; *) break ;; esac
+done
+web_ok=true; case "$code" in 000|502|503|504) web_ok=false; log "warning: https://dashboard.$TLD answers $code" ;; esac
+log "done: $(jq '[.[] | select(.ok)] | length' <<<"$results")/$(jq length <<<"$results") services up, dashboard $code"
+
+all_ok=false; [ "0" = "$failed" ] && [ "true" = "$web_ok" ] && all_ok=true
+if [ "1" = "$JSON" ]; then
+	jq -n --argjson s "$results" --arg pools "$fixed" --arg code "$code" --argjson ok "$all_ok" \
+		'{ok:$ok, services:$s, www_pools_disabled:($pools | split("\n") | map(select("" != .))), dashboard:$code}'
+else
+	jq -r '.[] | (if .ok then "  ✓ " else "  ✗ " end) + .name + ": " + .status + (if .error then "  (" + .error + ")" else "" end)' <<<"$results"
+	echo "  dashboard: $code"
+fi
+[ "true" = "$all_ok" ]

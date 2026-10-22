@@ -43,12 +43,24 @@ struct StackStatus: Decodable {
 	var defaultPhp: PhpVersion? { php.first(where: \.isDefault) }
 	var userSites: [Site] { sites.filter { $0.name != "dashboard" && $0.name != "phpmyadmin" } }
 
+	private static let core = ["nginx", "dnsmasq", "mysql@8.4"]
+
+	/// The default PHP serves every site that is not isolated (and the dashboard): it down means the stack is down.
 	var health: Health {
-		let core = ["nginx", "dnsmasq", "mysql@8.4"]
-		if core.contains(where: { name in !(services.first { $0.name == name }?.isRunning ?? false) }) { return .down }
+		if Self.core.contains(where: { name in !(services.first { $0.name == name }?.isRunning ?? false) }) { return .down }
+		if let d = defaultPhp, !d.fpmRunning { return .down }
 		if services.contains(where: \.isError) { return .degraded }
 		if php.contains(where: { $0.sites > 0 && !$0.fpmRunning }) { return .degraded }
 		return .ok
+	}
+
+	/// What is not running that should be, for the "stack down" notice: core services, failing services, and every
+	/// php-fpm a site runs on.
+	var problems: [String] {
+		var out = Self.core.filter { name in !(services.first { $0.name == name }?.isRunning ?? false) }
+		out += coreServices.filter { $0.isError && !out.contains($0.name) }.map(\.name)
+		out += php.filter { ($0.isDefault || $0.sites > 0) && !$0.fpmRunning }.map { "PHP \($0.version)" }
+		return out
 	}
 
 	var summary: String {
@@ -73,7 +85,7 @@ struct Service: Decodable, Identifiable, Equatable {
 	let user: String?
 	var id: String { name }
 	var isRunning: Bool { status == "started" }
-	var isError: Bool { status == "error" }
+	var isError: Bool { status.hasPrefix("error") }
 	var subtitle: String {
 		switch name {
 		case "nginx": return "web server, ports 80 and 443"
@@ -99,6 +111,8 @@ struct PhpVersion: Decodable, Identifiable, Equatable {
 	enum CodingKeys: String, CodingKey { case version, full, formula, fpm, sites, xdebug, brokenExt, isDefault = "default" }
 	var id: String { version }
 	var fpmRunning: Bool { fpm == "started" }
+	/// launchd keeps restarting it and it keeps dying at startup (a bad pool, a taken port).
+	var fpmError: Bool { fpm.hasPrefix("error") }
 }
 
 struct Site: Decodable, Identifiable, Equatable, Hashable {

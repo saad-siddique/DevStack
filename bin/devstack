@@ -43,6 +43,7 @@ Sites
 Stack
   devstack status [--json]                      services, PHP versions, sites, ports, MySQL, mail
   devstack doctor [--fix] [--json]              check everything; --fix starts stopped services and re-runs bootstrap for gaps
+  devstack restart [--json]                     restart the whole stack in order (brings back what sites need), then check a site answers
   devstack uninstall --yes [--purge]            remove DevStack from this Mac (sites, databases and backups stay)
   devstack watchdog                             restart nginx/dnsmasq if launchd lost them (runs every 5 min by itself)
   devstack service <name> start|stop|restart    nginx dnsmasq mysql@8.4 mailpit redis memcached php@X.Y
@@ -95,6 +96,7 @@ case "$cmd" in
 	php)                 exec "$BIN/site-php" "$@" ;;
 	wp)                  exec "$BIN/site-wp" "$@" ;;
 	doctor)              exec "$BIN/doctor" "$@" ;;
+	restart)             exec "$BIN/stack-restart" "$@" ;;
 	uninstall)           exec "$BIN/uninstall" "$@" ;;
 	sites)               exec "$BIN/stack-status" | jq -r '.sites[] | "\(.name)\t\(.php)\t\(if .secured then "https" else "http" end)\t\(if .protected then "protected" else "" end)"' | column -t -s $'\t' ;;
 	xdebug)              exec "$BIN/php-xdebug" "$@" ;;

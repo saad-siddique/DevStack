@@ -12,8 +12,8 @@ add() { # add <ok|warn|fail> <name> <detail> [fix text] [auto command]
 }
 auto_svc() { printf '%s/bin/service %s start' "$REPO_DIR" "$1"; }   # the auto command for "start this service"
 auto_boot() { printf '%s/bootstrap.sh' "$REPO_DIR"; }
-services="$( { sudo -n brew services list --json 2> /dev/null || echo '[]'; brew services list --json 2> /dev/null || echo '[]'; } | jq -s 'add')"
-svc_status() { jq -r --arg n "$1" '[.[] | select(.name == $n)] | max_by(if .status == "started" then 1 else 0 end) | .status // "none"' <<<"$services"; }
+services="$(services_json)"
+svc_status() { jq -r --arg n "$1" '(map(select(.name == $n)) | first | .status) // "none"' <<<"$services"; }
 
 # --- DNS and web
 if [ -f /etc/resolver/$TLD ]; then add ok "resolver" "/etc/resolver/$TLD present"; else add fail "resolver" "/etc/resolver/$TLD missing" "valet install"; fi
@@ -54,6 +54,9 @@ for d in "$BREW_PREFIX"/etc/php/*/; do
 	[ -z "$broken" ] || add fail "php $v extensions" "$broken fail to load (built against another PHP $v build)" "devstack php-repair $v" "$REPO_DIR/bin/php-repair $v"
 	[ -f "$d/conf.d/zz-uo-dev.ini" ] || add warn "php $v ini" "zz-uo-dev.ini drop-in missing" "./bootstrap.sh" "$(auto_boot)"
 	[ -f "$d/php-fpm.d/zz-devstack.conf" ] || add warn "php $v pool" "pool guard drop-in missing (5 workers, no request timeout)" "./bootstrap.sh" "$(auto_boot)"
+	if [ -f "$d/php-fpm.d/www.conf" ] && [ -f "$d/php-fpm.d/valet-fpm.conf" ]; then
+		add fail "php $v www pool" "Homebrew put back www.conf ([www] on 127.0.0.1:9000): only one PHP version can start" "devstack restart" "$REPO_DIR/bin/stack-restart"
+	fi
 done
 n_max="$(cat "$BREW_PREFIX"/var/log/php-fpm.log "$VALET_HOME"/Log/php-fpm.log 2> /dev/null | grep -c 'max_children' || true)"
 [ "${n_max:-0}" -gt 0 ] && add warn "php-fpm workers" "pool hit pm.max_children $n_max time(s) in the current logs" "raise pm.max_children in php/zz-devstack-fpm.conf, ./bootstrap.sh"
@@ -66,7 +69,8 @@ else add fail "mysql" "not answering" "devstack service mysql@8.4 start; devstac
 if curl -s -m 2 http://localhost:8025/api/v1/info > /dev/null; then add ok "mailpit" "UI on 8025"; else add warn "mailpit" "no answer on 8025 (sites' mail is lost)" "devstack service mailpit start" "$(auto_svc mailpit)"; fi
 if "$BREW_PREFIX/bin/redis-cli" -h 127.0.0.1 ping 2> /dev/null | grep -q PONG; then add ok "redis" "PONG on 127.0.0.1:6379"; else add warn "redis" "no PONG" "devstack service redis start" "$(auto_svc redis)"; fi
 if printf 'version\r\nquit\r\n' | nc -w1 127.0.0.1 11211 2> /dev/null | grep -q VERSION; then add ok "memcached" "answers on 11211"; else add warn "memcached" "no answer on 11211" "devstack service memcached start" "$(auto_svc memcached)"; fi
-jq -r '.[] | select(.status | test("^error")) | .name' <<<"$services" | while read -r n; do [ -n "$n" ] && add fail "launchd" "$n reports error" "devstack service $n restart; devstack logs $n"; done
+# Not `jq | while`: the loop would run in a subshell and its findings would never reach $checks.
+while read -r n; do [ -n "$n" ] && add fail "launchd" "$n reports error" "devstack service $n restart; devstack logs $n"; done < <(jq -r '.[] | select((.status // "") | test("^error")) | .name' <<<"$services")
 
 # --- certificates (Valet signs sites for ~1 year)
 soon=0; expired=0

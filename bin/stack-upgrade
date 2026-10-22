@@ -96,7 +96,9 @@ if [ "check" != "$MODE" ]; then
 		fi
 	done < <(jq -c '.[]' <<<"$todo")
 	# A PHP upgrade keeps etc/php/<v> but can drop the CLI link; make sure the default stays linked and ini drop-ins are present.
+	# It also puts back Homebrew's [www] pool on port 9000, which keeps every other php-fpm from starting.
 	if jq -e '.[] | select(.name | startswith("php"))' <<<"$upgraded" > /dev/null; then
+		fixed="$(fpm_disable_www_pools)"; [ -z "$fixed" ] || log "disabled Homebrew's www pool (port 9000) for PHP $(paste -sd' ' - <<<"$fixed")"
 		"$BREW_PREFIX/bin/brew" link --force --overwrite "$DEFAULT_PHP" > /dev/null 2>&1 || true
 		for d in "$BREW_PREFIX"/etc/php/*/conf.d; do sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" | cmp -s - "$d/zz-uo-dev.ini" || sed "s#__BREW_PREFIX__#$BREW_PREFIX#g" "$REPO_DIR/php/zz-uo-dev.ini" > "$d/zz-uo-dev.ini"; done
 	fi
