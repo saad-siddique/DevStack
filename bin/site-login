@@ -1,21 +1,35 @@
 #!/usr/bin/env bash
-# site-login <name> [--user LOGIN] [--print] [--json]
+# site-login <name> [--user LOGIN] [--to PATH] [--print] [--json]
 # Opens the site's wp-admin already signed in: mints a one-time token (60 s, stored hashed as a transient), makes
 # sure the uo-local-autologin mu-plugin is installed, and opens https://<name>.test/?uo_login=<token>.
 # Default user: the first administrator (multisite: the first super admin). --print only prints the URL.
+# --to PATH lands on that page of the site instead of the wp-admin dashboard, e.g. --to '/wp-admin/post.php?post=65&action=edit'.
+# The path is stored with the token (the link does not change) and must stay on the site: "/path?query", one leading
+# slash, no backslash, no control characters; the mu-plugin checks it again and sends it through home_url().
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-NAME="" ; USER_LOGIN="" ; PRINT=0 ; JSON=0
+NAME="" ; USER_LOGIN="" ; TO="" ; TO_SET=0 ; PRINT=0 ; JSON=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--user) USER_LOGIN="$2"; shift ;; --user=*) USER_LOGIN="${1#--user=}" ;;
+		--to) [ $# -ge 2 ] || die "--to needs a path, e.g. --to '/wp-admin/post.php?post=65&action=edit'"; TO="$2"; TO_SET=1; shift ;;
+		--to=*) TO="${1#--to=}"; TO_SET=1 ;;
 		--print) PRINT=1 ;; --json) JSON=1; PRINT=1 ;;
 		--*) die "unknown flag $1" ;;
 		*) NAME="$1" ;;
 	esac
 	shift
 done
-[ -n "$NAME" ] || die "usage: site-login <name> [--user LOGIN] [--print] [--json]"
+[ -n "$NAME" ] || die "usage: site-login <name> [--user LOGIN] [--to PATH] [--print] [--json]"
+# valid_to <path> : a plain same-site "/path?query". One leading slash (never "//": a browser reads that as another
+# host), no backslash (some browsers treat "\" as "/"), no control characters, at most 2000 bytes.
+valid_to() {
+	local LC_ALL=C
+	case "$1" in (/|/[!/\\]*) ;; (*) return 1 ;; esac
+	case "$1" in (*[[:cntrl:]]*|*\\*) return 1 ;; esac
+	[ "${#1}" -le 2000 ]
+}
+[ "0" = "$TO_SET" ] || valid_to "$TO" || die "--to needs a path on the site, such as /wp-admin/post.php?post=65&action=edit (one leading slash; no host, no backslash)"
 SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
 [ -n "$SITE_PATH" ] && [ -d "$SITE_PATH" ] || die "unknown site '$NAME' (not linked in Valet)"
 [ -f "$SITE_PATH/wp-config.php" ] || die "$NAME is not a WordPress site"
@@ -34,7 +48,7 @@ USER_ID="$(wp user get "$USER_LOGIN" --field=ID 2> /dev/null | tail -1 || true)"
 
 TOKEN="$(LC_ALL=C head -c 64 /dev/urandom | xxd -p | tr -d '\n' | cut -c1-48)"
 HASH="$(printf '%s' "$TOKEN" | shasum -a 256 | cut -d' ' -f1)"
-wp transient set uo_local_autologin "$(jq -cn --arg h "$HASH" --argjson u "$USER_ID" '{hash:$h,user:$u}')" 60 --quiet \
+wp transient set uo_local_autologin "$(jq -cn --arg h "$HASH" --argjson u "$USER_ID" --arg to "$TO" '{hash:$h,user:$u} + (if "" == $to then {} else {to:$to} end)')" 60 --quiet \
 	|| die "could not store the login token (is the database up?)"
 # The site's current home: its public URL while a tunnel pins it, so the cookie and the wp-admin redirect share a host.
 BASE="$(wp option get home 2> /dev/null | tail -1 | sed 's#/$##' || true)"
@@ -42,7 +56,8 @@ case "$BASE" in https://*|http://*) ;; *) BASE="$URL" ;; esac
 LOGIN_URL="$BASE/?uo_login=$TOKEN"
 
 if [ "1" = "$JSON" ]; then
-	jq -n --arg url "$LOGIN_URL" --arg user "$USER_LOGIN" --argjson id "$USER_ID" --arg site "$NAME" '{site:$site,user:$user,user_id:$id,url:$url,expires_in:60,ok:true}'
+	jq -n --arg url "$LOGIN_URL" --arg user "$USER_LOGIN" --argjson id "$USER_ID" --arg site "$NAME" --arg to "$TO" \
+		'{site:$site,user:$user,user_id:$id,url:$url,to:(if "" == $to then null else $to end),expires_in:60,ok:true}'
 elif [ "1" = "$PRINT" ]; then
 	echo "$LOGIN_URL"
 else

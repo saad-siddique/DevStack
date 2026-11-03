@@ -21,7 +21,7 @@ _devstack() {
 	case $words[2] in
 		php) (( CURRENT == 3 )) && _devstack_sites || { local -a v; v=( default ${(f)"$(ls "$(_devstack_php_dir)" 2> /dev/null)"} ); _describe 'php version' v; } ;;
 		wp) (( CURRENT == 3 )) && _devstack_sites ;;
-		remove|rm|backup|migrate|login|archive|restore|clone) (( CURRENT == 3 )) && _devstack_sites || _arguments '--yes' '--backup' '--keep-files' '--keep-db' '--db-only' '--files-only' '--user' '--print' '--replace' '--from:dir:_files -/' '--php' '--compress' '--no-compress' '--label' '--json' ;;
+		remove|rm|backup|migrate|login|archive|restore|clone) (( CURRENT == 3 )) && _devstack_sites || _arguments '--yes' '--backup' '--keep-files' '--keep-db' '--db-only' '--files-only' '--user' '--print' '--to:path:' '--replace' '--from:dir:_files -/' '--php' '--compress' '--no-compress' '--label' '--json' ;;
 		sizes) _arguments '--refresh' '--json' ;;
 		mysql-compact) _arguments '--yes' '--json' '--status' '--finish' '--rollback' '--stop-after' ;;
 		cleanup) _arguments '--json' '--drop' '--dry-run' '--yes' '--pin' '--unpin' '--sweep' '--enable-sweep' '--disable-sweep' '--older-than' ;;
