@@ -646,6 +646,13 @@ docs/                 migrating-from-mamp.md, screenshots (docs/img); docs/priva
 
 ## Things learned the hard way
 
+- **A re-pointed symlink kept serving the old checkout.** A plugin linked to a git worktree and switched with
+  `ln -sfn` still ran the old code from some php-fpm workers for up to two minutes: every worker caches resolved
+  paths for `realpath_cache_ttl` seconds (default 120) and the pool runs up to 20 workers, so one page could mix
+  both checkouts. `php/zz-uo-dev.ini` sets it to 1 s (never 0: that means "never expire"); `tests/realpath-cache.test.sh`
+  proves it with real PHP. The ini is picked up by `devstack update` (bootstrap copies it) but php-fpm reads it
+  at start, so restart once afterwards: the PHP tab's restart per version, or `devstack restart`.
+  `devstack restart <site>` does not help here: it only resets busy workers, and the stale entries sit in idle ones.
 - Pre-release PHP (8.6) is rebuilt by its tap without a version bump, so an upgraded extension can target a newer
   PHP build than the one installed ("Unable to initialize module ... module API=2026…"). After every upgrade,
   `stack-upgrade` checks each touched PHP and runs `php-repair`, which reinstalls that PHP and all its extensions
