@@ -4,6 +4,9 @@ set -euo pipefail
 
 # Never let a leftover MAMP PATH entry (old shells, IDE terminals) leak into brew/valet/php resolution.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAMP' | paste -sd: -)"; export PATH
+# A bare PATH (ssh command, IDE task, agent shell, LaunchAgent) holds no Homebrew, and everything below asks brew.
+# Only touched when brew cannot be found; Apple Silicon prefix first, Intel second (as bin/devstack does).
+command -v brew > /dev/null 2>&1 || PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH"; export PATH
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITES_DIR="${SITES_DIR:-$HOME/Sites}"
 # sites.tsv is the committed example; sites.local.tsv (git-ignored) holds the real inventory when it exists.
@@ -140,7 +143,10 @@ wp_exec() {
 	exec "$(php_bin "$php")" -d display_errors=stderr "$BREW_PREFIX/bin/wp" "$@"
 }
 
-mysql_new()     { "$BREW_PREFIX/opt/mysql@8.4/bin/mysql" -uroot "$@"; }
+# MYSQL_SOCK points the client at another server (the test suite's throwaway mysqld); unset = the real one.
+mysql_new()     { "$BREW_PREFIX/opt/mysql@8.4/bin/mysql" -uroot ${MYSQL_SOCK:+-S "$MYSQL_SOCK"} "$@"; }
+mysql_datadir() { mysql_new -N -e 'SELECT @@datadir'; }   # trailing slash included
+mysqldump_new() { "$BREW_PREFIX/opt/mysql@8.4/bin/mysqldump" -uroot ${MYSQL_SOCK:+-S "$MYSQL_SOCK"} "$@"; }
 mysql_old()     { "$MAMP_MYSQL_BIN/mysql" "${MAMP_MYSQL_ARGS[@]}" "$@" 2> >(grep -v 'Using a password' >&2); }
 mysqldump_old() { "$MAMP_MYSQL_BIN/mysqldump" "${MAMP_MYSQL_ARGS[@]}" "$@" 2> >(grep -v 'Using a password' >&2); }
 

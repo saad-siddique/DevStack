@@ -19,6 +19,8 @@ export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_INSTALL_CLE
 
 # Never let a leftover MAMP PATH entry (old shells, IDE terminals) leak into brew/valet/php resolution.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | /usr/bin/grep -v '^/Applications/MAMP' | paste -sd: -)"; export PATH
+# A bare PATH (ssh command, IDE task, agent shell) holds no Homebrew; only touched when brew cannot be found.
+command -v brew > /dev/null 2>&1 || PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$PATH"; export PATH
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BREW_PREFIX="$(brew --prefix)"
 COMPOSER_BIN="$HOME/.composer/vendor/bin"
@@ -480,18 +482,40 @@ ensure_cli() {
 }
 
 # `wp` under each site's PHP (shims/wp), ahead of Homebrew's wp on PATH. A symlink, so `git pull` updates it.
-# The PATH line goes last in ~/.zshrc so it lands in front of everything added before it.
+# The PATH line goes last in ~/.zshrc so it lands in front of everything added before it. ~/.zshrc is read by
+# interactive shells only, so ~/.zshenv (every zsh: ssh commands, IDE tasks, agent shells, where PATH holds no
+# Homebrew either) gets a guarded copy; the shim finds Homebrew by itself (lib.sh). Guarded because nested shells
+# would stack the entry otherwise.
 ensure_wp_shim() {
 	log "wp under each site's PHP"
 	local dir="$HOME/.local/share/devstack/bin"
 	local line='export PATH="$HOME/.local/share/devstack/bin:$PATH"'
+	local envline='case ":$PATH:" in *":$HOME/.local/share/devstack/bin:"*) ;; *) export PATH="$HOME/.local/share/devstack/bin:$PATH" ;; esac'
 	mkdir -p "$dir"
 	ln -sfn "$REPO_DIR/shims/wp" "$dir/wp"
 	if ! grep -qF "$line" "$HOME/.zshrc" 2> /dev/null; then
 		printf '\n# DevStack: wp under each site'"'"'s PHP\n%s\n' "$line" >> "$HOME/.zshrc"
 		ok "added to ~/.zshrc (open a new terminal)"
 	fi
+	if ! grep -qF "$envline" "$HOME/.zshenv" 2> /dev/null; then
+		printf '\n# DevStack: wp reachable from non-interactive shells too (ssh, IDE tasks, agents)\n%s\n' "$envline" >> "$HOME/.zshenv"
+		ok "added to ~/.zshenv (non-interactive shells)"
+	fi
 	ok "$dir/wp -> shims/wp"
+}
+
+# Bare mysql, php, composer… (shims/links): symlinks beside the wp shim, so they resolve wherever that directory is on
+# PATH, including shells whose PATH holds no Homebrew. A tool whose formula is not installed is reported, not linked.
+ensure_tool_links() {
+	log "bare mysql, php, composer… on PATH"
+	local dir="$HOME/.local/share/devstack/bin" name rel n=0
+	mkdir -p "$dir"
+	while read -r name rel; do
+		case "$name" in (""|\#*) continue ;; esac
+		[ -x "$BREW_PREFIX/$rel" ] || { warn "$name: $BREW_PREFIX/$rel not found, not linked"; continue; }
+		[ "$(readlink "$dir/$name" 2> /dev/null)" = "$BREW_PREFIX/$rel" ] || { ln -sfn "$BREW_PREFIX/$rel" "$dir/$name"; n=$((n + 1)); }
+	done < "$REPO_DIR/shims/links"
+	ok "$dir: tools linked ($n new or repointed)"
 }
 
 ensure_dashboard() {
@@ -516,11 +540,43 @@ ensure_services
 ensure_mysql_tuning
 ensure_dashboard
 ensure_phpmyadmin
+# Nightly `devstack cleanup --sweep` at 03:00 (after the 03:30 upgrade check would be too late for a morning's suites,
+# before the 04:00 log rotation). The command is inert until `devstack cleanup --enable-sweep` was run once on this Mac.
+ensure_cleanup_agent() {
+	log "Cleanup sweep agent"
+	local label="com.devstack.cleanup" plist="$HOME/Library/LaunchAgents/com.devstack.cleanup.plist" tmp
+	mkdir -p "$HOME/Library/LaunchAgents" "$BREW_PREFIX/var/log"
+	tmp="$(mktemp)"
+	cat > "$tmp" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+	<key>Label</key><string>$label</string>
+	<key>ProgramArguments</key><array><string>/bin/bash</string><string>$REPO_DIR/bin/cleanup</string><string>--sweep</string></array>
+	<key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
+	<key>RunAtLoad</key><false/>
+	<key>StandardOutPath</key><string>$BREW_PREFIX/var/log/devstack-cleanup.log</string>
+	<key>StandardErrorPath</key><string>$BREW_PREFIX/var/log/devstack-cleanup.log</string>
+	<key>EnvironmentVariables</key><dict><key>PATH</key><string>$BREW_PREFIX/bin:$BREW_PREFIX/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>HOME</key><string>$HOME</string></dict>
+</dict></plist>
+PLIST
+	if ! cmp -s "$tmp" "$plist"; then
+		launchctl bootout "gui/$(id -u)/$label" > /dev/null 2>&1 || true
+		mv "$tmp" "$plist"
+		launchctl bootstrap "gui/$(id -u)" "$plist" && ok "LaunchAgent installed: sweeps idle lane databases at 03:00 once enabled (devstack cleanup --enable-sweep)"
+	else
+		rm -f "$tmp"
+		launchctl print "gui/$(id -u)/$label" > /dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$plist"
+		ok "LaunchAgent present: sweeps idle lane databases at 03:00 once enabled"
+	fi
+}
 ensure_log_pruning
+ensure_cleanup_agent
 ensure_stack_upgrades
 ensure_watchdog
 ensure_mu_plugins
 ensure_cli
 ensure_wp_shim
+ensure_tool_links
 if [ "1" = "$WITH_APP" ]; then log "Menu-bar app"; "$REPO_DIR/bin/app" install; fi
 log "Done. devstack help lists every command; devstack app install builds the menu-bar app."

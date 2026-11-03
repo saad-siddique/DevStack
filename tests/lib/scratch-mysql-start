@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Starts the scratch mysqld on MYSQL_DATADIR; bin/mysql-compact runs it as MYSQL_START_CMD in the tests.
+"$MYSQLD_BIN" --datadir="$MYSQL_DATADIR" --log-error="${SCRATCH_ROOT:-/tmp}/err.log" < /dev/null > /dev/null 2>&1 &
+exit 0

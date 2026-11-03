@@ -251,3 +251,26 @@ table.list .bad { color: var(--danger); font-weight: 600; }
 	table.list th:first-child, table.list td:first-child { padding-left: 10px; }
 	.kind { font-size: 11px; padding: 1px 6px; }
 }
+
+/* Cleanup tab: databases no site owns, the nightly sweep, the MySQL catalog. */
+.cl-note { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--ink); font-weight: 500; }
+.cl-note.err { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
+.cl-note.warn { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); color: var(--warn); }
+.cl-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.cl-card p { margin: 6px 0; }
+.cl-card .hint { font-size: 13px; }
+.cl-card .upg-auto { margin: 0 0 6px; color: var(--ink); font-size: 14px; }
+.cl-hours { width: 5.5em; font: inherit; padding: 2px 6px; margin: 0 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.badge.throwaway { background: color-mix(in srgb, var(--on) 14%, var(--surface)); color: var(--on); }
+.badge.unknown { background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--warn); }
+.badge.locked { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: var(--danger); }
+.badge.pinned { margin-left: 6px; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
+table.list.cleanup td.chk { width: 1%; padding-right: 0; }
+table.list.cleanup td.pkg { width: auto; min-width: 11em; overflow-wrap: anywhere; }
+#cl-runs { overflow-x: auto; }
+table.list.cleanup td.pkg .count { white-space: nowrap; }
+table.list.cleanup .when, table.list.cleanup .size, table.list.cleanup .idle { white-space: nowrap; color: var(--muted); font-size: 13px; }
+button.act.armed { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.act.armed:hover { filter: brightness(1.08); color: #fff; }
+@media (max-width: 720px) { table.list.cleanup th:nth-child(4), table.list.cleanup td:nth-child(4), table.list.cleanup th:nth-child(7), table.list.cleanup td:nth-child(7) { display: none; } }

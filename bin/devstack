@@ -30,6 +30,10 @@ Sites
   devstack remove <name> --yes [--backup]       unlink, unsecure, drop database + user, delete folder
   devstack sites                                every linked site with its PHP version
   devstack sizes [--refresh]                    folder size per site (refresh walks the disk; the nightly run does too)
+  devstack cleanup [--json]                     databases no site owns, by test run: throwaway/unknown, locked/idle
+  devstack cleanup --drop <db|run>... --yes     drop them (--dry-run first); refuses owned, locked and pinned; --pin/--unpin <run>
+  devstack cleanup --enable-sweep               nightly sweep of lane databases idle 48 h+ (off until enabled once per machine; --older-than H, --disable-sweep)
+  devstack mysql-compact --yes                  give back the free space in mysql.ibd: dump, fresh data folder, restore (MySQL down for minutes; --status, --finish, --rollback)
   devstack favorite <name> [on|off]             pin a site to the top of the Sites list (app and dashboard)
   devstack cache <name> redis|memcached|off     persistent object cache for one site (per-site key prefix)
   devstack wp <name> <wp args...>               WP-CLI for a site from anywhere, under its PHP (inside a site plain wp does it)
@@ -86,6 +90,8 @@ case "$cmd" in
 	backups)             case "${1:-}" in --prune|--delete) exec "$BIN/site-backup" "$@" ;; *) exec "$BIN/site-backup" --list "$@" ;; esac ;;
 	archive)             exec "$BIN/site-remove" "$1" --yes --backup "${@:2}" ;;   # [--compress] passes through
 	sizes)               exec "$BIN/site-sizes" "$@" ;;
+	cleanup)             exec "$BIN/cleanup" "$@" ;;
+	mysql-compact)       exec "$BIN/mysql-compact" "$@" ;;
 	favorite|fav|star)   exec "$BIN/site-favorite" "$@" ;;
 	cache)               exec "$BIN/site-cache" "$@" ;;
 	share)               exec "$BIN/site-share" "$@" ;;

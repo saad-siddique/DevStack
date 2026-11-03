@@ -17,7 +17,7 @@
 	var logData = null;
 
 	var $ = function ( id ) { return document.getElementById( id ); };
-	var TABS = [ 'overview', 'php', 'services', 'upgrades', 'logs', 'tools' ];
+	var TABS = [ 'overview', 'php', 'services', 'upgrades', 'logs', 'cleanup', 'tools' ];
 	var currentTab = 'overview';
 
 	function setTab( name, push ) {
@@ -28,6 +28,7 @@
 		try { localStorage.setItem( 'devstack.tab', name ); } catch ( e ) {}
 		if ( false !== push && location.hash !== '#' + name ) { history.replaceState( null, '', '#' + name ); }
 		if ( 'logs' === name ) { loadLog(); } else { clearTimeout( logTimer ); }
+		if ( 'cleanup' === name ) { loadCleanup(); } else { clearTimeout( clTimer ); clearTimeout( compactTimer ); }
 	}
 	document.querySelectorAll( '.nav-item' ).forEach( function ( b ) { b.addEventListener( 'click', function () { setTab( b.getAttribute( 'data-tab' ) ); } ); } );
 	window.addEventListener( 'hashchange', function () { setTab( location.hash.replace( '#', '' ), false ); } );
@@ -543,6 +544,271 @@
 		post( 'log-clear', { source: logSource.source, site: logSource.site || '' } ).then( function ( r ) {
 			if ( r && r.error ) { showError( r.error ); }
 		} ).catch( function ( e ) { showError( String( e ) ); } ).then( function () { busy = false; logData = null; loadLog(); refresh(); } );
+	} );
+
+	/* ---- Cleanup tab: databases no site owns (devstack cleanup) and MySQL's catalog (devstack mysql-compact) ---- */
+	var cl = null;              // last ?api=cleanup answer
+	var clTimer = null;
+	var clSelected = {};        // run tag -> true
+	var clSeen = false;         // the first load pre-ticks throwaway, idle, unpinned runs; later loads keep the person's choices
+	var clArmed = null;         // 'drop' or 'compact' while a two-click confirm waits
+	var clArmTimer = null;
+	var clNotice = null;        // { text, error, load } shown above the strip; a load failure is cleared by the next good load, a drop result by the next action
+	var clCompact = null;       // last ?api=mysql-compact answer
+	var compactTimer = null;
+	var compactStarted = 0;     // when Start was clicked: the state file appears a few seconds later
+
+	function fmtIdle( sec ) {
+		if ( sec < 5400 ) { return Math.max( 1, Math.round( sec / 60 ) ) + ' min'; }
+		if ( sec < 172800 ) { return Math.round( sec / 3600 ) + ' h'; }
+		return Math.round( sec / 86400 ) + ' d';
+	}
+	function fmtWhen( iso ) {
+		if ( ! iso ) { return '–'; }
+		return new Date( iso ).toLocaleString( [], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } );
+	}
+	function plural( n, one, many ) { return n + ' ' + ( 1 === n ? one : many ); }
+
+	function postCleanup( op, names, extra ) {
+		var data = new URLSearchParams();
+		data.append( 'op', op );
+		( names || [] ).forEach( function ( n ) { data.append( 'names[]', n ); } );
+		Object.keys( extra || {} ).forEach( function ( k ) { data.append( k, extra[ k ] ); } );
+		return fetch( '?api=cleanup', { method: 'POST', headers: { 'X-Devstack': '1' }, body: data } ).then( function ( r ) { return r.json(); } );
+	}
+
+	function selectedRuns() { return ( cl ? cl.runs : [] ).filter( function ( r ) { return clSelected[ r.tag ]; } ); }
+
+	function arm( what ) { clArmed = what; clearTimeout( clArmTimer ); clArmTimer = setTimeout( disarm, 6000 ); updateDropButton(); renderCompact(); }
+	function disarm() { clArmed = null; clearTimeout( clArmTimer ); updateDropButton(); renderCompact(); }
+
+	function updateDropButton() {
+		var b = $( 'cl-drop' ), note = $( 'cl-drop-note' ), sel = selectedRuns();
+		var bytes = sel.reduce( function ( s, r ) { return s + r.files_bytes; }, 0 );
+		var dbs = sel.reduce( function ( s, r ) { return s + r.databases.length; }, 0 );
+		var unknown = sel.filter( function ( r ) { return 'throwaway' !== r.kind; } ).length;
+		b.disabled = ! sel.length || busy;
+		if ( 'drop' === clArmed ) {
+			b.textContent = 'Click again to drop ' + plural( dbs, 'database', 'databases' ) + ' (' + fmtSize( bytes ) + ')';
+			b.classList.add( 'armed' );
+		} else {
+			b.textContent = sel.length ? 'Drop ' + plural( dbs, 'database', 'databases' ) + ' selected' : 'Drop selected';
+			b.classList.remove( 'armed' );
+		}
+		note.textContent = unknown ? plural( unknown, 'selected run is', 'selected runs are' ) + ' not recognised as throwaway: each database is dumped to ~/Backups/DevStack/_dropped first.' : '';
+	}
+
+	function renderCleanup() {
+		var box = $( 'cl-runs' ), strip = $( 'cl-strip' ), note = $( 'cl-note' );
+		note.hidden = ! clNotice;
+		note.className = 'cl-note' + ( clNotice && clNotice.error ? ' err' : '' );
+		note.textContent = clNotice ? clNotice.text : '';
+		var warn = $( 'cl-warn' ), warnings = cl && cl.warnings ? cl.warnings : [];
+		warn.hidden = ! warnings.length;
+		warn.textContent = warnings.join( ' ' );
+		box.textContent = '';
+		strip.textContent = '';
+		if ( ! cl ) { $( 'cl-count' ).textContent = ''; updateDropButton(); renderSweep(); renderCompact(); return; }
+		[
+			[ 'Disk free', fmtSize( cl.disk_free_bytes ) ],
+			[ 'Databases', String( cl.mysql.databases ) ],
+			[ 'No site owns', String( cl.mysql.unowned ) ],
+			[ 'MySQL catalog', fmtSize( cl.mysql.catalog_bytes ) + ' (' + fmtSize( cl.mysql.catalog_free_bytes ) + ' free)' ]
+		].forEach( function ( p ) {
+			strip.appendChild( el( 'li', {}, [ el( 'span', { 'class': 'muted', text: p[ 0 ] } ), el( 'strong', { text: p[ 1 ] } ) ] ) );
+		} );
+		var runs = cl.runs, present = {};
+		$( 'cl-count' ).textContent = runs.length ? '(' + plural( runs.length, 'run', 'runs' ) + ')' : '';
+		runs.forEach( function ( r ) {
+			present[ r.tag ] = r;
+			if ( ! clSeen && 'throwaway' === r.kind && 'idle' === r.state && ! r.pinned ) { clSelected[ r.tag ] = true; }
+		} );
+		clSeen = true;
+		Object.keys( clSelected ).forEach( function ( t ) {
+			var r = present[ t ];
+			if ( ! r || 'idle' !== r.state || r.pinned ) { delete clSelected[ t ]; }
+		} );
+		if ( ! runs.length ) {
+			box.appendChild( el( 'p', { 'class': 'empty-box', text: 'No databases outside your sites. Nothing to clean up.' } ) );
+		} else {
+			var tbody = el( 'tbody' );
+			runs.forEach( function ( r ) {
+				var locked = 'locked' === r.state;
+				var cb = el( 'input', { type: 'checkbox', 'aria-label': 'Select ' + r.tag } );
+				cb.checked = !! clSelected[ r.tag ];
+				cb.disabled = locked || r.pinned;
+				cb.addEventListener( 'change', function () {
+					if ( cb.checked ) { clSelected[ r.tag ] = true; } else { delete clSelected[ r.tag ]; }
+					disarm();
+				} );
+				var looks = el( 'td', {}, [ el( 'span', { 'class': 'badge ' + ( 'throwaway' === r.kind ? 'throwaway' : 'unknown' ), text: r.kind } ) ] );
+				if ( r.pinned ) { looks.appendChild( el( 'span', { 'class': 'badge pinned', text: 'pinned' } ) ); }
+				var state = locked
+					? el( 'span', { 'class': 'badge locked', title: 'connection' === r.locked_reason ? 'A client is connected' : 'Written to in the last 30 minutes', text: 'connection' === r.locked_reason ? 'in use' : 'just written' } )
+					: el( 'span', { 'class': 'idle', text: 'idle ' + fmtIdle( r.idle_seconds ) } );
+				var pin = el( 'button', { 'class': 'act quiet', type: 'button', text: r.pinned ? 'Unpin' : 'Pin' } );
+				pin.addEventListener( 'click', function () {
+					postCleanup( r.pinned ? 'unpin' : 'pin', [ r.tag ] ).then( function ( res ) {
+						if ( res && res.error ) { showError( res.error ); }
+					} ).catch( function ( e ) { showError( String( e ) ); } ).then( loadCleanup );
+				} );
+				tbody.appendChild( el( 'tr', {}, [
+					el( 'td', { 'class': 'chk' }, [ cb ] ),
+					el( 'td', { 'class': 'pkg' }, [ el( 'span', { text: r.tag } ), el( 'span', { 'class': 'count', text: r.lanes > 1 ? r.lanes + ' lanes' : '' } ) ] ),
+					looks,
+					el( 'td', { 'class': 'when', text: fmtWhen( r.created ) } ),
+					el( 'td', { 'class': 'when', text: fmtWhen( r.last_write ) } ),
+					el( 'td', {}, [ state ] ),
+					el( 'td', { 'class': 'size', text: fmtSize( r.files_bytes ) } ),
+					el( 'td', { 'class': 'restarts' }, [ pin ] )
+				] ) );
+			} );
+			var head = el( 'tr', {}, [ '', 'Run', 'Looks', 'Created', 'Last write', 'State', 'Size', '' ].map( function ( h ) { return el( 'th', { scope: 'col', text: h } ); } ) );
+			box.appendChild( el( 'table', { 'class': 'list cleanup' }, [ el( 'thead', {}, [ head ] ), tbody ] ) );
+		}
+		updateDropButton();
+		renderSweep();
+		renderCompact();
+	}
+
+	function renderSweep() {
+		var box = $( 'cl-sweep' );
+		if ( box.contains( document.activeElement ) && document.activeElement !== box ) { return; }   // do not rebuild under someone typing
+		box.textContent = '';
+		if ( ! cl ) { return; }
+		var sw = cl.sweep, next = sw.next || [];
+		var on = el( 'input', { type: 'checkbox', 'aria-label': 'Nightly sweep' } );
+		on.checked = !! sw.enabled;
+		var hours = el( 'input', { type: 'number', min: '1', max: '99999', value: String( sw.older_than_hours ), 'class': 'cl-hours', 'aria-label': 'Hours without a write before the sweep drops a lane database' } );
+		box.appendChild( el( 'label', { 'class': 'upg-auto' }, [ on, document.createTextNode( ' Drop idle parallel-lane test databases every night at 03:00, after ' ), hours, document.createTextNode( ' hours without a write.' ) ] ) );
+		on.addEventListener( 'change', function () {
+			post( 'cleanup', { op: 'sweep', value: on.checked ? 'on' : 'off' } ).then( function ( r ) { if ( r && r.error ) { showError( r.error ); } } ).catch( function ( e ) { showError( String( e ) ); } ).then( loadCleanup );
+		} );
+		hours.addEventListener( 'change', function () {
+			var v = parseInt( hours.value, 10 );
+			if ( ! ( v >= 1 ) ) { hours.value = String( sw.older_than_hours ); return; }
+			post( 'cleanup', { op: 'sweep', value: String( v ) } ).then( function ( r ) { if ( r && r.error ) { showError( r.error ); } } ).catch( function ( e ) { showError( String( e ) ); } ).then( loadCleanup );
+		} );
+		box.appendChild( el( 'p', { 'class': 'hint', text: 'Only databases whose name ends in _single_N or _multisite_N and that have a test options table. Never a site’s, one in use, an unrecognised one or a pinned run. Each drop is logged in ~/Library/Logs/DevStack/cleanup-sweep.log.' } ) );
+		box.appendChild( el( 'p', { text: next.length
+			? ( sw.enabled ? 'Tonight’s sweep drops: ' : 'With the sweep on, it would drop now: ' ) + next.join( ', ' ) + '.'
+			: 'Nothing is idle long enough for the sweep right now.' } ) );
+	}
+
+	function loadCompact() {
+		clearTimeout( compactTimer );
+		fetch( '?api=mysql-compact', { cache: 'no-store' } ).then( function ( r ) { return r.json(); } ).then( function ( d ) {
+			clCompact = d;
+			renderCompact();
+			var starting = compactStarted && Date.now() - compactStarted < 20000 && ! d.step;
+			var running = d.step && 'verify' !== d.step && ! d.done;
+			if ( ( running || starting ) && 'cleanup' === currentTab && ! document.hidden ) { compactTimer = setTimeout( loadCompact, 3000 ); }
+		} ).catch( function () {} );
+	}
+
+	function compactCall( op ) {
+		busy = true;
+		post( 'mysql-compact', { op: op } ).then( function ( r ) {
+			if ( r && r.error ) { showError( r.error ); } else if ( 'start' === op ) { compactStarted = Date.now(); }
+		} ).catch( function ( e ) { showError( String( e ) ); } ).then( function () { busy = false; loadCompact(); loadCleanup(); } );
+	}
+
+	function renderCompact() {
+		var box = $( 'cl-compact' );
+		box.textContent = '';
+		var m = cl && cl.mysql, st = clCompact || { step: null, done: false };
+		var running = st.step && 'verify' !== st.step && ! st.done;
+		var waiting = 'verify' === st.step && ! st.done;
+		var starting = compactStarted && Date.now() - compactStarted < 20000 && ! st.step;
+		box.appendChild( el( 'p', { 'class': 'hint', text: 'MySQL keeps the space of every table it ever held and never gives it back; dropping databases does not change that. Compacting dumps everything, starts a fresh data folder and restores it. MySQL is down for minutes, so every site and test run fails meanwhile.' } ) );
+		if ( m ) {
+			box.appendChild( el( 'p', { text: 'Catalog file: ' + fmtSize( m.catalog_bytes ) + ', of which ' + fmtSize( m.catalog_free_bytes ) + ' is free space a compaction gives back.' } ) );
+			var throwaway = cl.runs.filter( function ( r ) { return 'throwaway' === r.kind; } ).reduce( function ( s, r ) { return s + r.databases.length; }, 0 );
+			if ( throwaway ) { box.appendChild( el( 'p', { 'class': 'hint', text: plural( throwaway, 'throwaway database', 'throwaway databases' ) + ' would be dumped and restored too: drop them first.' } ) ); }
+		}
+		if ( running || starting ) {
+			box.appendChild( el( 'p', { text: starting ? 'Starting…' : 'Running. Last completed step: ' + st.step + '. MySQL will be down for part of this.' } ) );
+		} else if ( waiting ) {
+			var fin = el( 'button', { 'class': 'act primary', type: 'button', text: 'Finish: delete the old data folder' } );
+			var back = el( 'button', { 'class': 'act', type: 'button', text: 'Roll back' } );
+			fin.addEventListener( 'click', function () { if ( ! busy ) { compactCall( 'finish' ); } } );
+			back.addEventListener( 'click', function () { if ( ! busy ) { compactCall( 'rollback' ); } } );
+			box.appendChild( el( 'p', { text: 'Compacted and checked: schema, table and user counts match. The old data folder is kept until you finish, which is when the space comes back.' } ) );
+			box.appendChild( el( 'div', { 'class': 'row-actions' }, [ fin, back ] ) );
+		} else {
+			if ( st.done ) { box.appendChild( el( 'p', { text: 'The last compaction finished.' } ) ); }
+			else if ( compactStarted && ! st.step ) { box.appendChild( el( 'p', { 'class': 'hint', text: 'It did not start: see ~/Library/Logs/DevStack/mysql-compact.log (most often another client is connected to MySQL).' } ) ); }
+			var go = el( 'button', { 'class': 'act' + ( 'compact' === clArmed ? ' armed' : '' ), type: 'button', text: 'compact' === clArmed ? 'Click again: MySQL goes down now' : 'Compact MySQL…' } );
+			go.addEventListener( 'click', function () {
+				if ( busy ) { return; }
+				if ( 'compact' !== clArmed ) { arm( 'compact' ); return; }
+				disarm();
+				compactStarted = 0;
+				compactCall( 'start' );
+			} );
+			box.appendChild( el( 'div', { 'class': 'row-actions' }, [ go ] ) );
+		}
+	}
+
+	function loadCleanup() {
+		clearTimeout( clTimer );
+		if ( 'cleanup' !== currentTab ) { return; }
+		fetch( '?api=cleanup', { cache: 'no-store' } ).then( function ( r ) { return r.json(); } ).then( function ( d ) {
+			if ( d && d.runs ) { cl = d; if ( clNotice && clNotice.load ) { clNotice = null; } } else { cl = null; clNotice = { error: true, load: true, text: d && d.error ? 'Cleanup: ' + d.error + '.' : 'Could not read the databases.' }; }
+		} ).catch( function () { cl = null; clNotice = { error: true, load: true, text: 'Could not reach the dashboard backend.' }; } ).then( function () {
+			renderCleanup();
+			clTimer = setTimeout( function () { if ( ! document.hidden ) { loadCleanup(); } else { loadCleanupLater(); } }, REFRESH_MS );
+		} );
+		loadCompact();
+	}
+	function loadCleanupLater() { clTimer = setTimeout( function () { if ( ! document.hidden ) { loadCleanup(); } else { loadCleanupLater(); } }, REFRESH_MS ); }
+
+	$( 'cl-refresh' ).addEventListener( 'click', function () { clNotice = null; loadCleanup(); } );
+	function setNote( n ) {
+		clNotice = n;
+		var note = $( 'cl-note' );
+		note.hidden = ! n;
+		note.className = 'cl-note' + ( n && n.error ? ' err' : '' );
+		note.textContent = n ? n.text : '';
+	}
+
+	// Databases per request. nginx gives a request 60 s, so dropping hundreds in one POST would end in a 504 while the
+	// server went on dropping, and the person would click again. Names, not run tags, so one big run is split too: the
+	// drop guard judges every name by its run, so a locked or pinned run is still refused whole.
+	var DROP_BATCH = 25;
+	function dropRuns( runs ) {
+		var names = [], batches = [], done = 0, freed = 0, dropped = 0, refused = [], failure = null, i;
+		runs.forEach( function ( r ) { r.databases.forEach( function ( d ) { names.push( d ); } ); } );
+		for ( i = 0; i < names.length; i += DROP_BATCH ) { batches.push( names.slice( i, i + DROP_BATCH ) ); }
+		return batches.reduce( function ( chain, batch ) {
+			return chain.then( function () {
+				if ( failure ) { return; }
+				setNote( { error: false, text: 'Dropping… ' + done + ' of ' + plural( names.length, 'database', 'databases' ) + ' done.' } );
+				return postCleanup( 'drop', batch ).then( function ( res ) {
+					if ( ! res || ! res.dropped ) { failure = ( res && res.error ) || 'The drop failed.'; return; }
+					dropped += res.dropped.length; freed += res.freed_bytes; refused = refused.concat( res.refused ); done += batch.length;
+				} ).catch( function ( e ) { failure = String( e ); } );
+			} );
+		}, Promise.resolve() ).then( function () {
+			var shown = refused.slice( 0, 5 ).map( function ( x ) { return x.name + ' (' + x.reason + ')'; } ).join( ', ' );
+			var tail = refused.length ? ' Refused ' + refused.length + ': ' + shown + ( refused.length > 5 ? ' and ' + ( refused.length - 5 ) + ' more' : '' ) + '.' : '';
+			var did = 'Dropped ' + plural( dropped, 'database', 'databases' ) + ', freed ' + fmtSize( freed ) + '.';
+			setNote( failure ? { error: true, text: did + ' Stopped: ' + failure + tail } : { error: refused.length > 0, text: did + tail } );
+		} );
+	}
+
+	$( 'cl-drop' ).addEventListener( 'click', function () {
+		var sel = selectedRuns();
+		if ( ! sel.length || busy ) { return; }
+		if ( 'drop' !== clArmed ) { arm( 'drop' ); return; }
+		disarm();
+		busy = true;
+		updateDropButton();
+		dropRuns( sel ).then( function () {
+			busy = false;
+			clSelected = {};
+			loadCleanup();
+		} );
 	} );
 
 	$( 'filter' ).addEventListener( 'input', function ( e ) {

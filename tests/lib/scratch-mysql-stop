@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stops the scratch mysqld (tests/lib/scratch-mysql.sh); bin/mysql-compact runs it as MYSQL_STOP_CMD in the tests.
+B="${BREW_PREFIX:-/opt/homebrew}/opt/mysql@8.4"
+"$B/bin/mysqladmin" --no-defaults -uroot -S "$MYSQL_SOCK" shutdown > /dev/null 2>&1 || true
+for _ in $(seq 1 30); do [ -S "$MYSQL_SOCK" ] || exit 0; sleep 1; done
+exit 0
