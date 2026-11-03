@@ -326,6 +326,7 @@ struct SiteRow: View {
 						.disabled(current || site.isProtected)
 					}
 				}
+				Button("Restart site (reset its PHP workers)") { Task { await state.restartSite(site) } }.disabled(state.isBusy("site:" + site.name))
 				if site.wp {
 					Menu("Object cache") {
 						ForEach(["redis", "memcached", "off"], id: \.self) { b in
