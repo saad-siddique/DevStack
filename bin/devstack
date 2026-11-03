@@ -40,7 +40,7 @@ Sites
   devstack share <name> [--hostname H]          public URL through Cloudflare (named tunnel from ~/.cloudflared, else quick)
   devstack share --stop [name] | --status       unshare one site, or stop devstack's tunnel; what is public
   devstack php <name> <7.4|8.2|…|default>       switch the PHP version one site runs on
-  devstack login <name> [--user U] [--print]    open wp-admin already signed in (one-time link, 60 s)
+  devstack login <name> [--user U] [--to PATH] [--print]   open wp-admin signed in (one-time link, 60 s); --to lands on that page, e.g. '/wp-admin/post.php?post=65&action=edit'
   devstack open [dashboard|phpmyadmin|mailpit|<site>]
   devstack migrate <host> | migrate-all         MAMP → Valet (sites.tsv)
 

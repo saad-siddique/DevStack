@@ -233,6 +233,7 @@ devstack new myplugin --php 8.2                  # fresh WordPress at https://my
                                                  # --admin-user/--admin-password/--admin-email say otherwise
                                                  # --php accepts 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (default), 8.5, 8.6
 devstack login myplugin                          # opens wp-admin already signed in (one-time link, 60 s, first admin)
+devstack login myplugin --to '/wp-admin/post.php?post=65&action=edit'   # ...landing on that page instead of the dashboard
 devstack wp myplugin plugin list                 # WP-CLI for a site from any directory, under its PHP (inside it: plain wp)
 devstack import client ~/Downloads/client.zip    # LocalWP export, any zip/folder with a WordPress root + .sql, or a backup folder
 devstack backup myplugin                         # ~/Backups/DevStack/myplugin/<stamp>/ — see Backups
@@ -354,6 +355,12 @@ installed into every site by `bootstrap`, `new`, `import`, `migrate` and on firs
 request arrived with ends in `.test` (devstack's tunnels send `<site>.test`), deletes the transient, compares hashes
 with `hash_equals`, sets the auth cookie and redirects to wp-admin. A reused or expired link gets a 403. `--user <login>` picks another account; the default is
 the first administrator (the first super admin on multisite).
+
+`--to <path>` lands on a page instead of the dashboard (a post's editor, a settings tab, a plugin screen), for people and for scripts that
+take screenshots: `devstack login myplugin --to '/wp-admin/post.php?post=65&action=edit'`. The path is stored with the token
+(the link itself does not change) and is relative to the site's home URL. It must be a plain same-site path: one leading slash, no
+host, no `//`, no backslash, no control characters, at most 2000 bytes. `devstack` refuses anything else before it mints a token, and the
+mu-plugin checks again and sends the path through `home_url()`, so the link can never become an open redirect. Without `--to` nothing changes.
 
 ## Sharing a site publicly
 
