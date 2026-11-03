@@ -348,6 +348,8 @@ final class AppState: ObservableObject {
 	func restart(_ s: Service) async { await quick(s.name, ["service", s.name, "restart"], label: "\(s.name) restarted") }
 	func toggleXdebug(_ p: PhpVersion) async { await quick("php@\(p.version)", ["xdebug", p.xdebug ? "off" : "on", "--php", p.version], label: "Xdebug \(p.xdebug ? "off" : "on") for PHP \(p.version)") }
 	func toggleFpm(_ p: PhpVersion) async { await quick("php@\(p.version)", ["service", "php@\(p.version)", p.fpmRunning ? "stop" : "start"], label: "php-fpm \(p.version) \(p.fpmRunning ? "stopped" : "started")") }
+	/// One site only: kills the php-fpm workers that are serving it (the pool respawns them); other sites are untouched.
+	func restartSite(_ site: Site) async { await quick("site:" + site.name, ["restart", site.name], label: "\(site.name) PHP workers reset") }
 	func restartFpm(_ p: PhpVersion) async { await quick("php@\(p.version)", ["service", "php@\(p.version)", "restart"], label: "php-fpm \(p.version) restarted") }
 
 	func isBusy(_ key: String) -> Bool { busy.contains(key) }
