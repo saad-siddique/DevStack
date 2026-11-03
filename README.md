@@ -185,6 +185,7 @@ The icon gains an exclamation badge when a core service is down or launchd repor
 | Change a site's PHP version | ⋯ → PHP version → pick one. Writes `.valetrc`, isolates the site, starts that php-fpm. |
 | Open a site in your editor or terminal | ⋯ → Open in VS Code / Cursor / PhpStorm / Terminal (whatever is installed). |
 | Check the whole stack | ⋯ → Run doctor. Every check with its fix, in the task window. |
+| Unstick one site | Site ⋯ → Restart site. Kills the PHP workers that are serving that site right now (a hung request or a runaway loop) and the pool respawns them in a second; other sites keep their workers. Does not apply a changed PHP setting: that is the PHP tab's restart, which affects every site on that version. |
 | Restart the whole stack | ⋯ menu → Restart stack, or the button on the "stack is down" notice. Restarts every service in order (what sites need is started even when stopped or failing; a service you switched off stays off), then checks that a site answers. |
 | See what went wrong | Every long task streams its log into the task window; *Copy log* copies it. Stack logs are on the dashboard's Logs tab. |
 
@@ -246,6 +247,7 @@ devstack cache myplugin redis|memcached|off      # persistent object cache for o
 devstack backup myplugin --db-only --label "x"   # database save point; devstack restore myplugin --db-only rolls back to the newest
 devstack doctor --fix                            # start what is stopped, re-run bootstrap for gaps, check again
 devstack restart                                 # the whole stack, in order: brings back what sites need, then checks a site answers
+devstack restart myplugin [--cache]              # one site only: kills the PHP workers serving it (the pool respawns them); --cache also flushes its object cache
 devstack uninstall --yes [--purge]               # remove DevStack (sites, databases, backups stay)
 devstack restore myplugin [--replace]            # bring it back exactly as it was (same URL, PHP, database, logins)
 devstack clone myplugin myplugin-copy            # a copy under a new name: own database, URLs rewritten
@@ -315,6 +317,12 @@ sites with its built-in drivers.
 
 - Sites without a `.valetrc` run the default, PHP 8.4. `--php` on `new`/`import` isolates a site; for an existing one:
   `printf 'php=php@7.4\n' > ~/Sites/site/.valetrc && valet isolate php@7.4 --site=site`.
+- A site has no php-fpm process of its own: every site on a PHP version shares that version's pool (one socket per version).
+  `devstack restart <site>` therefore resets the *workers serving that site*: a PHP worker sits in the folder of the script
+  it runs and goes back to php-fpm's own folder when the request ends, so a worker whose working directory is inside the
+  site is stuck on it. Those get SIGTERM (SIGKILL after 3 s), the pool's master respawns them, and the other sites keep
+  their workers. An idle site has nothing to reset and the command says so. A changed `php.ini` setting or extension
+  needs the version's whole php-fpm restarted instead (`devstack service php@X.Y restart`).
 - php-fpm runs only for the default version and for versions some site isolates. Stop an idle one with
   `devstack service php@8.2 stop` or the switch on the app's PHP tab.
 - `wp` follows the site you are in: from the site root or any folder below it (a plugin you are working on), it

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# site-restart <site> [--cache] [--json]
+# Restart ONE site without touching the others. php-fpm runs one pool per PHP version and every site on that
+# version shares it (one socket per version), so a site has no process of its own to restart. What it does have is
+# the workers serving it right now: a PHP worker's working directory is the folder of the script it is running and
+# goes back to php-fpm's own folder when the request ends. So the workers whose working directory is inside the
+# site are the ones stuck on it (a hung request, a runaway loop, a deadlocked call). Those are killed, and the pool's
+# master respawns them within a second; every other site keeps its workers and its requests.
+# --cache also flushes the site's object cache (WP-CLI under the site's PHP).
+# What this is not: it does not apply a changed PHP setting or extension (that needs the whole version's php-fpm:
+# `devstack service php@X.Y restart`), and opcache needs nothing (it revalidates on every request).
+# Exit 1 when the site is unknown, --cache is asked of a site that is not WordPress (before anything is killed), or
+# the flush fails (after the workers were reset).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+NAME=""; CACHE=0; JSON=0
+for arg in "$@"; do
+	case "$arg" in
+		--cache) CACHE=1 ;; --json) JSON=1 ;;
+		--*) die "unknown flag $arg (usage: site-restart <site> [--cache] [--json])" ;;
+		*) [ -z "$NAME" ] || die "one site at a time (usage: site-restart <site> [--cache] [--json])"; NAME="$arg" ;;
+	esac
+done
+[ -n "$NAME" ] || die "usage: site-restart <site> [--cache] [--json]"
+case "$NAME" in (*/*|.*) die "$NAME is not a linked site" ;; esac
+SITE_PATH="$(readlink "$VALET_HOME/Sites/$NAME" 2> /dev/null || true)"
+[ -n "$SITE_PATH" ] && [ -d "$SITE_PATH" ] || die "$NAME is not a linked site"
+# lsof reports real paths: compare against the real one.
+REAL="$(cd -P "$SITE_PATH" && pwd -P)"
+if [ "1" = "$CACHE" ] && [ ! -f "$SITE_PATH/wp-config.php" ]; then die "--cache needs a WordPress site, and $NAME has no wp-config.php"; fi
+PHPV="$(site_php "$SITE_PATH")"
+GRACE="${SITE_RESTART_GRACE:-3}"
+
+# alive <pid> : running, and not a zombie waiting for its parent.
+alive() { local s; s="$(ps -o stat= -p "$1" 2> /dev/null | tr -d ' ')"; [ -n "$s" ] && [ "Z" != "${s:0:1}" ]; }
+
+# workers : the pid of every php-fpm worker of this user. The masters run as root (Valet), the workers as the
+# developer, and a worker is a php-fpm process whose parent is a php-fpm process (Homebrew's 7.4 never retitles its
+# processes, so the name alone cannot tell master from worker).
+workers() {
+	/bin/ps -axo pid=,ppid=,uid=,command= | awk -v me="$(id -u)" '
+		{ cmd = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +/, "", cmd); c[$1] = cmd; pp[$1] = $2; u[$1] = $3 }
+		END { for (p in c) if (u[p] == me && c[p] ~ /php-fpm/ && c[pp[p]] ~ /php-fpm/) print p }'
+}
+
+# busy_here : "<pid><TAB><cwd>" for each worker working inside this site.
+busy_here() {
+	local pids
+	pids="$(workers | paste -sd, -)"
+	[ -n "$pids" ] || return 0
+	# lsof exits 1 when a pid vanished between the two calls; the lines it did print are still good.
+	{ /usr/sbin/lsof -a -d cwd -Fpn -p "$pids" 2> /dev/null || true; } | awk '
+		/^p/ { pid = substr($0, 2) }
+		/^n/ { print pid "\t" substr($0, 2) }' | while IFS="$(printf '\t')" read -r pid cwd; do
+		case "$cwd" in ("$REAL"|"$REAL"/*) printf '%s\t%s\n' "$pid" "$cwd" ;; esac
+	done
+}
+
+log "=== site-restart $NAME"
+busy="$(busy_here)"
+pids="$(printf '%s\n' "$busy" | cut -f1 | grep -E '^[0-9]+$' || true)"
+if [ -n "$pids" ]; then
+	# shellcheck disable=SC2086
+	kill -TERM $pids 2> /dev/null || true
+	waited=0
+	while [ "$waited" -lt $((GRACE * 5)) ]; do
+		left=0; for p in $pids; do alive "$p" && left=1; done
+		[ "0" = "$left" ] && break
+		sleep 0.2; waited=$((waited + 1))
+	done
+	for p in $pids; do
+		if alive "$p"; then log "pid $p ignored SIGTERM for ${GRACE}s: SIGKILL"; kill -KILL "$p" 2> /dev/null || true; fi
+	done
+fi
+count="$(printf '%s\n' "$pids" | grep -c -E '^[0-9]+$' || true)"
+
+cache="skipped"
+if [ "1" = "$CACHE" ]; then
+	if wp_site "$PHPV" "$SITE_PATH" cache flush > /dev/null 2>&1; then cache="flushed"; else cache="failed"; log "warning: wp cache flush failed for $NAME"; fi
+fi
+ok=true; [ "failed" != "$cache" ] || ok=false
+
+killed="$(printf '%s' "$busy" | jq -R -s -c 'split("\n") | map(select(. != "") | split("\t") | {pid: (.[0] | tonumber), cwd: .[1]})')"
+if [ "1" = "$JSON" ]; then
+	jq -n --arg site "$NAME" --arg php "$PHPV" --argjson killed "$killed" --arg cache "$cache" --argjson ok "$ok" \
+		'{site:$site, php:$php, killed:$killed, cache:$cache, ok:$ok}'
+else
+	if [ "0" = "$count" ]; then echo "$NAME: no PHP request was running for it; nothing to reset"
+	else echo "$NAME: reset $count PHP worker$([ "1" = "$count" ] || echo s) ($PHPV); the pool respawns them"; fi
+	[ "skipped" = "$cache" ] || echo "$NAME: object cache $cache"
+fi
+[ "true" = "$ok" ]
