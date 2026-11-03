@@ -102,11 +102,15 @@ In order, it:
    the MySQL tuning `mysql/zz-devstack.cnf` (no binary log).
 5. Links and secures `dashboard.test`; downloads phpMyAdmin into `~/.local/share/devstack/phpmyadmin` and serves it
    as `phpmyadmin.test`.
-6. Installs three user LaunchAgents: `com.devstack.logs-prune` rotates logs daily at 04:00, `com.devstack.upgrade`
-   checks Homebrew for stack upgrades at 03:30, `com.devstack.watchdog` revives nginx/dnsmasq every five minutes.
+6. Installs four user LaunchAgents: `com.devstack.logs-prune` rotates logs daily at 04:00, `com.devstack.upgrade`
+   checks Homebrew for stack upgrades at 03:30, `com.devstack.watchdog` revives nginx/dnsmasq every five minutes,
+   `com.devstack.cleanup` runs `devstack cleanup --sweep` at 03:00 (inert until you run `devstack cleanup --enable-sweep`).
 7. Copies the `mu-plugins/` into every site (one-click login, public sharing, local SSL).
 8. Links `bin/devstack` to `/opt/homebrew/bin/devstack` and its completion into `share/zsh/site-functions`, and the
-   `wp` wrapper (`shims/wp`) into `~/.local/share/devstack/bin`, first on PATH, so `wp` follows each site's PHP.
+   `wp` wrapper (`shims/wp`) into `~/.local/share/devstack/bin`, first on PATH (`~/.zshrc`, and `~/.zshenv` for
+   non-interactive shells), so `wp` follows each site's PHP. The same directory gets symlinks for `mysql`, `mysqldump`,
+   `php`, `composer`, `redis-cli`, `devstack` and friends (the list is `shims/links`), so bare commands work in
+   shells whose PATH holds no Homebrew (ssh commands, IDE tasks, agent shells).
 9. With `--app`: builds `DevStack.app`, installs it into `/Applications` and starts it.
 
 When it finishes, **DevStack.app is in `/Applications` and already running**: look for the stacked-layers DevStack
@@ -235,6 +239,7 @@ devstack backups                                 # list them, newest first
 devstack backups --prune --keep 5                # delete older backups (the newest of every site always stays)
 devstack archive myplugin [--no-compress]        # verbatim backup (files compressed, disk freed), then remove the site
 devstack sizes [--refresh]                       # disk per site folder (the nightly run refreshes; --refresh walks now)
+devstack cleanup [--json]                        # databases no site owns, by test run: throwaway/unknown, locked/idle
 devstack favorite myplugin [on|off]              # pin a site to the top of the Sites list, in the app and on the dashboard
 devstack share myplugin | --stop [myplugin]      # public URL through Cloudflare: your named tunnel if ~/.cloudflared maps one, else a quick one
 devstack cache myplugin redis|memcached|off      # persistent object cache for one site (per-site key prefix, shared servers)
@@ -314,8 +319,12 @@ sites with its built-in drivers.
   `devstack service php@8.2 stop` or the switch on the app's PHP tab.
 - `wp` follows the site you are in: from the site root or any folder below it (a plugin you are working on), it
   runs WP-CLI under the PHP in the nearest `.valetrc`; outside a site it runs the default. Bootstrap links that
-  wrapper (`shims/wp`) into `~/.local/share/devstack/bin` and puts it first on PATH in `~/.zshrc`, so it works in
-  terminals, IDEs and scripts alike, and warnings go to stderr so piped output and `--format=json` stay clean. From
+  wrapper (`shims/wp`) into `~/.local/share/devstack/bin` and puts it first on PATH in `~/.zshrc` (interactive
+  shells) and, guarded against stacking, in `~/.zshenv` (ssh commands, IDE tasks, agent shells: a bare PATH there
+  holds no Homebrew, so the wrapper finds Homebrew itself, as every `bin/` script does; `mysql`, `php`, `composer`
+  and the rest of `shims/links` are symlinked into the same directory for the same reason, and `devstack doctor`
+  checks them; only zsh reads `~/.zshenv`, so `bash -c`, cron and launchd still need absolute paths). It works in terminals, IDEs
+  and scripts alike, and warnings go to stderr so piped output and `--format=json` stay clean. From
   anywhere else, `devstack wp <site> plugin list`. (`valet php` alone only reads a `.valetrc` in the exact folder you
   are in, not in parent folders. `valet composer` has the same limit for Composer.)
 - Xdebug is installed for every version and off by default because it costs speed. The Xdebug checkbox on the app's
@@ -406,19 +415,90 @@ three seconds.
 - **Prune** (`devstack backups --prune --keep 5 [--older-than 30]`) deletes older backups per site; the newest one
   always survives. `devstack backups --delete <dir>` removes one. Nothing prunes automatically.
 
+## Cleanup: databases no site owns
+
+A machine that runs parallel test suites (PHPUnit lanes, several agents at once) piles up throwaway databases, and
+nobody owns dropping them. `devstack cleanup` lists every database that no site owns, grouped into runs (the lanes of
+one test run share a tag):
+
+- **Owned** (never listed): the `DB_NAME` of every linked site's `wp-config.php` (the docroot's, else the parent
+  folder's, as WordPress finds it; commented-out lines are ignored), every `db` in `sites.local.tsv`, and the system
+  schemas. Names never decide ownership: imported sites have random database names. A wp-config that names `DB_NAME`
+  without a literal (`getenv()`, a constant, an include) cannot be read: `--json` then carries a `warnings` entry and
+  the tab shows it, and until it is fixed only a database that has the lane suffix **and** a test options table counts
+  as throwaway; everything else is unknown (and so is dumped before it is dropped).
+- **Throwaway**: the name ends in `_single_<n>` or `_multisite_<n>` (the lane suffix), or an options table has a test
+  prefix (`test_…options`, `wptests_…options`). **Unknown**: neither. Unknown is listed, never pre-selected, never
+  swept.
+- **Locked**: a live connection uses the database, or it was written to in the last 30 minutes. Last write is the later
+  of the newest table-file time and MySQL's `UPDATE_TIME` (read with the statistics cache off: its default of a day
+  makes `UPDATE_TIME` stale).
+- `--json` prints the same listing the dashboard reads.
+- **Drop**: `devstack cleanup --drop <database|run>… --yes` (`--dry-run` shows what it would do, no `--yes` needed). A
+  run tag drops all its lanes. It re-scans at drop time, so a database written to after the listing you looked at is
+  refused as locked; a run with any locked lane is refused whole. Owned, locked and pinned are refused, and so is a
+  database whose `DROP` fails (`drop_failed`: a client holds a lock on one of its tables; the wait is capped at 30 s),
+  with exit 1 and the reasons in `--json`. A run whose tag equals an owned database's name (lanes `x_single_0` next to
+  the site database `x`) drops the lanes and leaves `x` alone. Anything that is not throwaway (an unknown database) is dumped first to
+  `~/Backups/DevStack/_dropped/<stamp>/<db>.sql.zst`; a throwaway is dropped without a dump. A target that matches
+  nothing is reported under `already_gone`, so rerunning an interrupted drop is safe.
+- **Pin**: `--pin <run>…` / `--unpin <run>…` keeps a run out of pre-selection, the sweep and drops (unpin first). Pins
+  live in `~/.local/share/devstack/cleanup.json`.
+- **Sweep**: `devstack cleanup --enable-sweep` once per machine (the setting survives `devstack update`; it is off in the
+  code because the repo is public and another tool's database can look like a lane). The sweep drops only the
+  parallel-lane databases: the name ends in `_single_<n>` or `_multisite_<n>` **and** an options table has a test
+  prefix, no site owns it, nothing is connected to it, its last write is older than 48 hours (`--older-than <hours>`),
+  and it is not pinned. Each drop is appended to `~/Library/Logs/DevStack/cleanup-sweep.log` (time, name, bytes); the
+  04:00 log rotation leaves that file alone, because it is the only record of what the sweep deleted.
+  `devstack cleanup --sweep --dry-run` shows what it would drop now, switch or not; `--json` lists the same under
+  `sweep.next`. Fewer lane databases alive at once also keeps MySQL's catalog (`mysql.ibd`) from growing back.
+
+### Compact MySQL: getting `mysql.ibd` back
+
+MySQL's catalog file `mysql.ibd` grows with every table ever created and never gives the space back, and no in-place
+shrink exists (`OPTIMIZE` on it is refused, `ALTER TABLESPACE mysql` is a reserved name). Dropping databases frees
+their own files only. On a machine that once held hundreds of test databases it can sit at several GB, mostly free
+space (`devstack cleanup` shows its size and free part). `devstack mysql-compact --yes` rebuilds it:
+
+1. refuses if any other client is connected or the disk cannot hold the dump plus a new data folder (twice the data
+   plus 2 GB, estimated from live content), makes MySQL **super-read-only** so a late writer (a wp-admin tab, WP-Cron, a
+   suite starting) fails loudly instead of being restored over, then writes a compressed dump of everything, users and
+   grants included, to `~/Backups/DevStack/_mysql-compact/<stamp>/`;
+2. stops MySQL, **renames** the data folder to `<datadir>.before-compact-<stamp>`, initialises a fresh one (root
+   without a password, as before), starts MySQL on it and restores the dump;
+3. checks that the schema, table and user counts equal the counts before, and rolls back by itself if they do not.
+
+The old folder stays until `devstack mysql-compact --finish`: that is the moment the space returns. State lives in
+`~/.local/share/devstack/mysql-compact.json`, so a run killed halfway resumes at the next step when run again, except
+that a run interrupted **before** MySQL was stopped starts over with a fresh dump (MySQL kept taking writes, so the old
+dump is stale). The read-only fence is lifted whenever a run ends before the stop; if a run is killed outright
+(`kill -9`) MySQL stays read-only until the next `devstack mysql-compact --yes` or `--rollback`. The move, the new data
+folder and the restore refuse to run while a MySQL is up that should not be, and the restore refuses a server that is not
+running on the new data folder.
+`--rollback` puts the old folder back and starts MySQL on it. `--status [--json]` shows the step. MySQL is down for
+minutes, so every site and running test suite fails meanwhile: stop them first, and drop the throwaway databases
+before (`devstack cleanup --drop …`), so they are neither dumped nor restored. Verified on a throwaway server:
+users keep their passwords, and a catalog grown by churn went back to the size of a fresh one.
+
 ## Logs and retention
 
 - nginx and PHP errors land in `~/.config/valet/Log/`; the php-fpm master log, Redis and Mailpit in
   `/opt/homebrew/var/log/`; MySQL in `/opt/homebrew/var/mysql/*.err`; each WordPress site in its `wp-content/debug.log`.
-- The dashboard (`https://dashboard.test`) has Overview, PHP, Services, Upgrades, Logs and Tools tabs. It reloads once a minute
+- The dashboard (`https://dashboard.test`) has Overview, PHP, Services, Upgrades, Logs, Cleanup and Tools tabs. It reloads once a minute
   while visible, never while hidden, and has a Refresh button. Its Logs tab tails any log with severity colouring and a
   filter, and the masthead turns red when launchd reports a service in error or macOS wrote a crash report for a stack
   process in the last 24 hours: the failures WordPress itself cannot report.
 - Retention: the `com.devstack.logs-prune` LaunchAgent runs `bin/logs-prune` daily at 04:00. Each log is copied to
   `.1` and truncated in place, so writers keep appending; `.1` files older than 48 hours are deleted and any live log
   over 100 MB is rotated at once.
+- The Cleanup tab lists the databases no site owns, one row per test run (lanes grouped), with a Looks tag (throwaway or
+  unknown), created and last-write times, locked or idle, and size. Throwaway, idle, unpinned runs are pre-ticked;
+  locked and pinned rows cannot be ticked; **Drop selected** asks for a second click and then drops 25 databases per
+  request with a running count (a request has 60 s before nginx gives up), so a few hundred databases are fine. Below it: the nightly-sweep switch
+  and its hours, and the MySQL catalog card (size, free part, **Compact MySQL…** with progress, then **Finish** or
+  **Roll back**). Every button runs `devstack cleanup` or `devstack mysql-compact`.
 - Dashboard writes (services, Xdebug, upgrades and the nightly setting, favourites, sharing, one-click login, folder
-  sizes, PHP repair, clearing a log) are POST requests that require the `X-Devstack: 1` header and only call the
+  sizes, PHP repair, clearing a log, dropping or pinning databases, the sweep, compaction) are POST requests that require the `X-Devstack: 1` header and only call the
   `bin/` commands with allow-listed arguments, so another website open in your browser cannot trigger them.
 
 ## Guards
@@ -434,8 +514,11 @@ What keeps a bad plugin, a stuck request or a forgotten service from ruining the
   requests, a request killed after 300 s, and anything slower than 15 s written with a stack trace to
   `~/.config/valet/Log/php-fpm-slow.log` (`devstack logs slow`).
 - **MySQL** (`mysql/zz-devstack.cnf`): binary logging off (it had grown to 7 GB in a day and earned mysqld a
-  macOS "disk writes" report), `innodb_flush_log_at_trx_commit = 2`, a 512 MB buffer pool, 256 MB packets for big
-  imports. Bootstrap installs it and deletes the stale binary logs once MySQL runs without them.
+  macOS "disk writes" report), `innodb_flush_log_at_trx_commit = 2`, a 512 MB buffer pool, a 2 GB redo log (hot
+  pages coalesce instead of being flushed every 100 MB of redo: 17% fewer bytes written under a test-suite-shaped
+  load, 2 GB of disk), 256 MB packets for big imports. Bootstrap installs it and deletes the stale binary logs once
+  MySQL runs without them. The redo log is about three quarters of what a test suite writes and no setting lowers
+  it, so a long suite still earns a report; `devstack doctor` says where the writes went.
 - **Runaway watch** in the app: process CPU and memory are sampled every 3 s while the panel is open and once a
   minute while closed; a service above 120% CPU for 90 s or over 3 GB gets a line with a Restart button and a
   notification.
@@ -443,7 +526,11 @@ What keeps a bad plugin, a stuck request or a forgotten service from ruining the
   writes, CPU, wakeups) for stack processes. Crashes are red, resource reports orange, in the app, on the dashboard
   and in `devstack doctor`. macOS files a disk-writes report once a process writes about 2 GB in a day, which MySQL
   does routinely behind a PHPUnit suite (each test rolls back, and `TRUNCATE` recreates the table file). Reports
-  under 256 KB/s stay in `devstack logs crashes`, marked routine, and raise no notice.
+  under 256 KB/s stay in `devstack logs crashes`, marked routine, and raise no notice. A report above
+  that is either a long suite (a mini filed 137 GB in 13 h, 2.9 MB/s, mostly undo and dictionary writes) or one
+  table rewritten in a loop. `devstack doctor` tells them apart from the bytes written since MySQL started
+  (`performance_schema`): undo, dictionary and tables, and a warning naming the table when one table alone takes
+  over 256 KB/s.
 - **Homebrew's `www` pool**: every `brew upgrade` or `reinstall` of a PHP puts back `php-fpm.d/www.conf`, a pool on
   `127.0.0.1:9000`. The first php-fpm to start takes the port and every other version dies at startup, so all their
   sites answer 502. `fpm_disable_www_pools` in `bin/lib.sh` renames it to `www.conf-backup`, as Valet does, wherever
@@ -451,8 +538,8 @@ What keeps a bad plugin, a stuck request or a forgotten service from ruining the
   run it before they start PHP, and the watchdog runs it every five minutes for upgrades made by hand.
 - **`devstack doctor`**: DNS resolver and dnsmasq, nginx and its config, ports 80/443 and which program holds them (by
   path, so LocalWP's router nginx is caught), php-fpm per version against the sites that need it, Homebrew's `www`
-  pool, PHP extensions that fail to load, MySQL, Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet signs sites for a year),
-  sudoers trust, the devstack link, the three LaunchAgents, free disk, old root-owned PHP builds Homebrew cannot clean,
+  pool, PHP extensions that fail to load, MySQL (and the table file it has written the most), Mailpit, Redis, Memcached, launchd errors, certificate expiry (Valet signs sites for a year),
+  sudoers trust, the devstack link, the four LaunchAgents, free disk, old root-owned PHP builds Homebrew cannot clean,
   backup size, the stray wp-config trap, recent reports. Every finding comes with the command that fixes it. Exit 1
   when something is red.
 - **Logs** rotate daily and never outlive 48 hours (see below).
@@ -514,7 +601,7 @@ To remove DevStack (sites in `~/Sites`, databases under `/opt/homebrew/var/mysql
 them):
 
 ```bash
-devstack uninstall --yes            # the app, the three LaunchAgents, any share tunnel, Valet, the data services, the devstack command
+devstack uninstall --yes            # the app, the four LaunchAgents, any share tunnel, Valet, the data services, the devstack command
 devstack uninstall --yes --purge    # also ~/.local/share/devstack (phpMyAdmin, settings, caches)
 ```
 
@@ -535,7 +622,7 @@ dashboard/            dashboard.test (PHP + a little JS)
 bin/                  THE CONTRACT — devstack (dispatcher)  site-new  site-import  site-backup  site-restore  site-clone
                       site-remove  site-login  site-php  site-share  site-cache  site-sizes  site-favorite  php-xdebug
                       php-repair  service  stack-status  stack-upgrade  doctor  watchdog  update  uninstall  logs
-                      logs-prune  migrate-site  migrate-all  mamp-backout  app
+                      logs-prune  cleanup  mysql-compact  migrate-site  migrate-all  mamp-backout  app
 completions/          zsh completion for devstack
 app/                  DevStack.app: SwiftUI MenuBarExtra + Swift Charts, Swift Package; only ever runs `devstack …`
                       Icon.svg is the single icon source (app icon, menu-bar template images, dashboard favicon)

@@ -7,6 +7,11 @@
  * POST /?api=service   name=<service> op=start|stop|restart   -> bin/service
  * POST /?api=xdebug    php=8.4|7.4  op=on|off                  -> bin/php-xdebug
  * POST /?api=php-repair php=8.6                              -> bin/php-repair (extensions that fail to load)
+ * GET  /?api=cleanup                                         -> bin/cleanup --json (databases no site owns, by run)
+ * POST /?api=cleanup  op=drop|pin|unpin names[] [dry_run=1]   -> bin/cleanup --drop|--pin|--unpin
+ * POST /?api=cleanup  op=sweep value=on|off|<hours>           -> bin/cleanup --enable-sweep|--disable-sweep|--older-than
+ * GET  /?api=mysql-compact                                    -> bin/mysql-compact --status --json
+ * POST /?api=mysql-compact op=start|finish|rollback           -> bin/mysql-compact (start runs detached; poll the GET)
  *
  * Writes need the request header X-Devstack: 1. A page on another origin cannot add that header without a
  * CORS preflight, which this endpoint never answers, so a stray tab cannot stop your services.
@@ -42,6 +47,30 @@ function devstack_run( array $argv, string $home ): array {
 	fclose( $pipes[1] );
 	fclose( $pipes[2] );
 	return array( proc_close( $proc ), $out, $err );
+}
+
+/**
+ * Start one repo command detached and return at once: its output goes to $log, nothing is read back. A long job (the MySQL
+ * compaction) has to outlive the request. No nohup: without a console macOS's nohup exits instead of running the command,
+ * so the shell backgrounds it itself.
+ *
+ * @param string[] $argv Command and arguments (escaped here).
+ */
+function devstack_spawn( array $argv, string $log, string $home ): void {
+	$cmd = implode( ' ', array_map( 'escapeshellarg', $argv ) );
+	$env = implode(
+		' ',
+		array(
+			'HOME=' . escapeshellarg( $home ),
+			'USER=' . escapeshellarg( get_current_user() ),
+			'PATH=' . escapeshellarg( DEVSTACK_BREW . '/bin:' . DEVSTACK_BREW . '/sbin:/usr/bin:/bin:/usr/sbin:/sbin' ),
+			'LANG=en_US.UTF-8',
+		)
+	);
+	if ( ! is_dir( dirname( $log ) ) ) {
+		mkdir( dirname( $log ), 0775, true );
+	}
+	exec( '/usr/bin/env -i ' . $env . ' ' . $cmd . ' < /dev/null > ' . escapeshellarg( $log ) . ' 2>&1 &' );
 }
 
 function devstack_json( int $status, array $payload ): void {
@@ -216,6 +245,83 @@ if ( '' !== $api ) {
 		devstack_json( 0 === $code ? 200 : 500, 0 === $code ? array( 'ok' => true ) : array( 'error' => trim( $err ) ?: 'php-repair failed' ) );
 	}
 
+	if ( 'cleanup' === $api && ! $is_write ) {
+		list( $code, $out ) = devstack_run( array( $repo_bin . '/cleanup', '--json' ), $home );
+		$data               = json_decode( $out, true );
+		devstack_json( 0 === $code && is_array( $data ) ? 200 : 500, is_array( $data ) ? $data : array( 'error' => 'cleanup failed' ) );
+	}
+
+	if ( 'cleanup' === $api && $is_write ) {
+		$op    = (string) ( $_POST['op'] ?? '' );
+		$names = isset( $_POST['names'] ) && is_array( $_POST['names'] ) ? array_map( 'strval', $_POST['names'] ) : array();
+		$argv  = array( $repo_bin . '/cleanup' );
+		if ( in_array( $op, array( 'drop', 'pin', 'unpin' ), true ) ) {
+			if ( array() === $names || count( $names ) > 500 ) {
+				devstack_json( 400, array( 'error' => 'Name at least one run or database.' ) );
+			}
+			foreach ( $names as $name ) {
+				// No leading hyphen: the command would read it as a flag. The command quotes and re-validates on its own.
+				if ( 1 !== preg_match( '/^[A-Za-z0-9_$][A-Za-z0-9_$-]{0,63}$/', $name ) ) {
+					devstack_json( 400, array( 'error' => 'Bad database or run name.' ) );
+				}
+			}
+			$argv[] = '--' . $op;
+			foreach ( $names as $name ) {
+				$argv[] = $name;
+			}
+			if ( 'drop' === $op ) {
+				$argv[] = '1' === (string) ( $_POST['dry_run'] ?? '' ) ? '--dry-run' : '--yes';
+			}
+		} elseif ( 'sweep' === $op ) {
+			$value = (string) ( $_POST['value'] ?? '' );
+			if ( 'on' === $value ) {
+				$argv[] = '--enable-sweep';
+			} elseif ( 'off' === $value ) {
+				$argv[] = '--disable-sweep';
+			} elseif ( 1 === preg_match( '/^[1-9][0-9]{0,4}$/', $value ) ) {
+				array_push( $argv, '--older-than', $value );
+			} else {
+				devstack_json( 400, array( 'error' => 'Sweep value must be on, off or a number of hours.' ) );
+			}
+		} else {
+			devstack_json( 400, array( 'error' => 'Unknown operation.' ) );
+		}
+		$argv[] = '--json';
+		set_time_limit( 600 );   // dropping hundreds of databases takes a while
+		list( $code, $out, $err ) = devstack_run( $argv, $home );
+		$data                     = json_decode( $out, true );
+		if ( ! is_array( $data ) ) {
+			devstack_json( 500, array( 'error' => trim( $err ) ?: 'cleanup failed' ) );
+		}
+		devstack_json( 0 === $code ? 200 : 409, $data );   // 409: the command refused something; its JSON says what
+	}
+
+	if ( 'mysql-compact' === $api && ! $is_write ) {
+		list( $code, $out ) = devstack_run( array( $repo_bin . '/mysql-compact', '--status', '--json' ), $home );
+		$data               = json_decode( $out, true );
+		devstack_json( 0 === $code && is_array( $data ) ? 200 : 500, is_array( $data ) ? $data : array( 'error' => 'mysql-compact failed' ) );
+	}
+
+	if ( 'mysql-compact' === $api && $is_write ) {
+		$op = (string) ( $_POST['op'] ?? '' );
+		if ( 'start' === $op ) {
+			list( , $sout ) = devstack_run( array( $repo_bin . '/mysql-compact', '--status', '--json' ), $home );
+			$state          = json_decode( $sout, true );
+			if ( is_array( $state ) && 'verify' === ( $state['step'] ?? null ) && empty( $state['done'] ) ) {
+				devstack_json( 409, array( 'error' => 'A compaction is waiting to be finished or rolled back.', 'state' => $state ) );
+			}
+			// The command takes its own lock, so a second start while one runs exits at once and only logs it.
+			devstack_spawn( array( $repo_bin . '/mysql-compact', '--yes', '--json' ), $home . '/Library/Logs/DevStack/mysql-compact.log', $home );
+			devstack_json( 202, array( 'started' => true ) );
+		}
+		if ( in_array( $op, array( 'finish', 'rollback' ), true ) ) {
+			set_time_limit( 600 );   // rollback stops and starts MySQL
+			list( $code, , $err ) = devstack_run( array( $repo_bin . '/mysql-compact', '--' . $op ), $home );
+			devstack_json( 0 === $code ? 200 : 409, 0 === $code ? array( 'ok' => true ) : array( 'error' => trim( $err ) ?: 'mysql-compact failed' ) );
+		}
+		devstack_json( 400, array( 'error' => 'Unknown operation.' ) );
+	}
+
 	devstack_json( 404, array( 'error' => 'Unknown api.' ) );
 }
 
@@ -246,6 +352,7 @@ header( 'Cache-Control: no-store' );
 			<button class="nav-item" role="tab" data-tab="services" aria-selected="false" aria-controls="tab-services">Services<span class="dot" hidden></span></button>
 			<button class="nav-item" role="tab" data-tab="upgrades" aria-selected="false" aria-controls="tab-upgrades">Upgrades<span class="n" id="upg-count" hidden></span><span class="dot" hidden></span></button>
 			<button class="nav-item" role="tab" data-tab="logs" aria-selected="false" aria-controls="tab-logs">Logs<span class="dot" hidden></span></button>
+			<button class="nav-item" role="tab" data-tab="cleanup" aria-selected="false" aria-controls="tab-cleanup">Cleanup<span class="dot" hidden></span></button>
 			<button class="nav-item" role="tab" data-tab="tools" aria-selected="false" aria-controls="tab-tools">Tools<span class="dot" hidden></span></button>
 		</nav>
 		<div class="rail-foot">
@@ -327,6 +434,27 @@ header( 'Cache-Control: no-store' );
 				<button class="act quiet" type="button" id="log-clear">Clear this log</button>
 			</div>
 			<pre class="log" id="log-body" tabindex="0" aria-live="off"></pre>
+		</section>
+
+		<section class="tab" id="tab-cleanup" role="tabpanel" data-tab="cleanup" hidden>
+			<header class="tab-head">
+				<h2>Cleanup</h2>
+				<p class="hint">Databases no site owns, grouped by test run. Every action runs <code>devstack cleanup</code> or <code>devstack mysql-compact</code>.</p>
+				<div class="quick"><button class="act" type="button" id="cl-refresh">Refresh</button></div>
+			</header>
+			<p class="cl-note" id="cl-note" role="status" hidden></p>
+			<p class="cl-note warn" id="cl-warn" role="status" hidden></p>
+			<ul class="strip" id="cl-strip"></ul>
+			<div class="panel-head">
+				<h3>Not owned by a site <span class="count" id="cl-count"></span></h3>
+				<div class="quick"><button class="act primary" type="button" id="cl-drop" disabled>Drop selected</button></div>
+			</div>
+			<p class="hint" id="cl-drop-note"></p>
+			<div id="cl-runs"></div>
+			<div class="panel-head"><h3>Nightly sweep</h3></div>
+			<div class="cl-card" id="cl-sweep"></div>
+			<div class="panel-head"><h3>MySQL catalog</h3></div>
+			<div class="cl-card" id="cl-compact"></div>
 		</section>
 
 		<section class="tab" id="tab-tools" role="tabpanel" data-tab="tools" hidden>

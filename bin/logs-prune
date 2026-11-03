@@ -16,7 +16,11 @@ VALET_LOG="$VALET_HOME/Log"; BREW_LOG="$BREW_PREFIX/var/log"
 targets=("$VALET_LOG/nginx-error.log" "$VALET_LOG/php-fpm.log" "$VALET_LOG/php-fpm-slow.log" "$BREW_LOG/php-fpm.log" "$BREW_LOG/redis.log" "$BREW_LOG/mailpit.log" "$BREW_LOG/devstack-prune.log" "$BREW_LOG/devstack-upgrade.log")
 for f in "$BREW_PREFIX"/var/mysql/*.err; do [ -f "$f" ] && targets+=("$f"); done
 for l in "$VALET_HOME"/Sites/*; do [ -L "$l" ] && t="$(readlink "$l")" && [ -f "$t/wp-content/debug.log" ] && targets+=("$t/wp-content/debug.log"); done
-for f in "$LOG_DIR"/*.log; do [ -f "$f" ] && targets+=("$f"); done
+# cleanup-sweep.log is the audit trail of what the nightly sweep dropped: rotation would erase it within 48 h.
+for f in "$LOG_DIR"/*.log; do
+	case "$f" in (*/cleanup-sweep.log) continue ;; esac
+	[ -f "$f" ] && targets+=("$f")
+done
 
 rotated=(); skipped=(); restart_nginx=0; freed=0
 for f in "${targets[@]}"; do

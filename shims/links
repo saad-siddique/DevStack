@@ -1,0 +1,18 @@
+# Bare commands for every zsh, however thin its PATH (ssh command, IDE task, agent shell). bootstrap.sh links each
+# name into ~/.local/share/devstack/bin (on PATH through ~/.zshenv) pointing at <Homebrew prefix>/<path>; doctor checks
+# the links and uninstall removes them. The targets are Homebrew's own entries (opt/ for the keg-only mysql), so
+# upgrades and `brew link` keep them current. wp is not here: shims/wp is a wrapper that follows each site's PHP.
+# name          path under the Homebrew prefix
+mysql           opt/mysql@8.4/bin/mysql
+mysqldump       opt/mysql@8.4/bin/mysqldump
+mysqladmin      opt/mysql@8.4/bin/mysqladmin
+mysqlcheck      opt/mysql@8.4/bin/mysqlcheck
+mysqlimport     opt/mysql@8.4/bin/mysqlimport
+mysqlshow       opt/mysql@8.4/bin/mysqlshow
+mysqlbinlog     opt/mysql@8.4/bin/mysqlbinlog
+php             bin/php
+php-config      bin/php-config
+phpize          bin/phpize
+composer        bin/composer
+redis-cli       bin/redis-cli
+devstack        bin/devstack

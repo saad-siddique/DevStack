@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+# mysql-compact --yes [--json] [--stop-after <step>] | --status [--json] | --finish | --rollback
+# Reclaims the space inside MySQL's catalog file (mysql.ibd). MySQL reuses free space in it but never returns it to the
+# disk, and no in-place shrink exists (OPTIMIZE is refused, ALTER TABLESPACE mysql is a reserved name): the only way is
+# dump everything, start a fresh data folder, restore. Steps, in order:
+#   preflight  refuse if another client is connected or the disk is too small; remember counts, paths, stamp
+#   dump       mysqldump --all-databases (users and grants included) -> ~/Backups/DevStack/_mysql-compact/<stamp>/
+#   stop       stop mysql@8.4
+#   move       rename the data folder to <datadir>.before-compact-<stamp> (never deleted until --finish)
+#   init       mysqld --initialize-insecure on a new data folder (root without a password, as before)
+#   start      start MySQL on it
+#   restore    load the dump, FLUSH PRIVILEGES
+#   verify     schema, table and user counts must equal the counts from preflight; on a mismatch it rolls back itself
+# Until MySQL is stopped, the old server is the only real copy: from the end of preflight it is made super-read-only, so
+# a late writer (a wp-admin tab, WP-Cron, a test suite starting) fails loudly instead of being restored over; the fence
+# is lifted whenever the run ends before the stop. A run interrupted before the stop therefore starts over with a fresh
+# dump: its old dump is stale, because the server kept running and taking writes.
+# State lives in $DATA_DIR/mysql-compact.json, so a run killed halfway resumes at the next step; --rollback puts the
+# old folder back. --finish (after verify) deletes the old folder: that is when the space returns. MySQL is down for the
+# stop..start steps, so every site and running suite fails meanwhile.
+# Overrides (the test suite uses them): MYSQL_DATADIR, MYSQL_STOP_CMD, MYSQL_START_CMD, MYSQLD_BIN, MYSQL_SOCK, BACKUP_ROOT.
+# Test hooks, never set in real use: COMPACT_FREE_BYTES (pretend this much disk is free), COMPACT_TAMPER_PRE=1 (corrupt the
+# recorded counts before verify, to exercise the automatic rollback), COMPACT_HOOK_AFTER_DUMP (a command run right after the
+# dump, to simulate a late writer).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+usage() {
+	cat >&2 <<'USAGE'
+usage: mysql-compact --yes [--json] [--stop-after <step>]    steps: preflight dump stop move init start restore verify
+       mysql-compact --status [--json]
+       mysql-compact --finish      delete the old data folder (after verify): the space returns now
+       mysql-compact --rollback    put the old data folder back and start MySQL on it
+USAGE
+	exit 2
+}
+STEPS="preflight dump stop move init start restore verify"
+ACTION=run; JSON=0; YES=0; STOP_AFTER=""; MODE=""
+for arg in "$@"; do
+	case "$arg" in
+		--yes) YES=1 ;;
+		--json) JSON=1 ;;
+		--status) ACTION=status ;;
+		--finish) ACTION=finish ;;
+		--rollback) ACTION=rollback ;;
+		--stop-after) MODE=stop ;;
+		-*) usage ;;
+		*) if [ "stop" = "$MODE" ]; then STOP_AFTER="$arg"; MODE=""; else usage; fi ;;
+	esac
+done
+if [ "stop" = "$MODE" ]; then usage; fi
+case "$STOP_AFTER" in (""|preflight|dump|stop|move|init|start|restore|verify) ;; (*) usage ;; esac
+if [ "run" = "$ACTION" ] && [ "1" != "$YES" ]; then echo "mysql-compact: refusing without --yes (MySQL goes down for minutes)" >&2; usage; fi
+
+STATE_FILE="$DATA_DIR/mysql-compact.json"
+BACKUP_ROOT="${BACKUP_ROOT:-$HOME/Backups/DevStack}"
+MYSQLD_BIN="${MYSQLD_BIN:-$BREW_PREFIX/opt/mysql@8.4/bin/mysqld}"
+MYSQL_STOP_CMD="${MYSQL_STOP_CMD:-$BREW_PREFIX/bin/brew services stop mysql@8.4}"
+MYSQL_START_CMD="${MYSQL_START_CMD:-$BREW_PREFIX/bin/brew services start mysql@8.4}"
+SYS="'mysql','sys','information_schema','performance_schema'"
+
+state_json() { if [ -f "$STATE_FILE" ]; then cat "$STATE_FILE"; else echo '{"step":null,"done":false}'; fi; }
+state_get()  { state_json | jq -r --arg k "$1" '.[$k] // empty'; }
+# state_update <jq filter> [jq args...] : atomic rewrite of the state file.
+state_update() {
+	local filter="$1" tmp
+	shift
+	mkdir -p "$DATA_DIR"
+	tmp="$(mktemp "$DATA_DIR/mysql-compact.json.XXXXXX")"
+	state_json | jq -c "$@" "$filter" > "$tmp" && mv "$tmp" "$STATE_FILE"
+}
+
+server_up()  { mysql_new -e 'SELECT 1' > /dev/null 2>&1; }
+wait_up()    { local i; for i in $(seq 1 120); do server_up && return 0; sleep 1; done; return 1; }
+wait_down()  { local i; for i in $(seq 1 60); do server_up || return 0; sleep 1; done; return 1; }
+run_cmd()    { bash -c "$1" > /dev/null 2>&1; }   # the stop/start commands are command strings
+
+# The write fence (see the header). FENCE is 1 while this process holds it; FENCE_PRIOR is read_only as the server had it.
+FENCE=0; FENCE_PRIOR=0
+release_fence() {
+	if [ "1" = "$FENCE" ] && server_up; then
+		mysql_new -e "SET GLOBAL super_read_only = OFF; SET GLOBAL read_only = $FENCE_PRIOR" > /dev/null 2>&1 || true
+	fi
+	FENCE=0
+}
+
+# assert_new_server : whatever answers must be running on the new data folder, not an old one started by hand, by brew
+# services or left over; restoring a dump into the wrong server would corrupt the only copy that is left.
+assert_new_server() {
+	local want got
+	want="$(state_get datadir)/"
+	got="$(mysql_datadir)" || die "cannot read the data folder of the MySQL that answers"
+	[ "$got" = "$want" ] || die "the MySQL that answers is not running on the new data folder (it uses $got, expected $want); --rollback puts the old data folder back"
+}
+
+# counts_json : what verify compares. System schemas are left out; mysql.user is the users.
+counts_json() {
+	mysql_new -N -e "SET SESSION information_schema_stats_expiry = 0; SELECT (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ($SYS)), (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA NOT IN ($SYS)), (SELECT COUNT(*) FROM mysql.user)" \
+		| jq -R -c 'split("\t") | {schemas: (.[0] | tonumber), tables: (.[1] | tonumber), users: (.[2] | tonumber)}'
+}
+
+step_preflight() {
+	local others="" data need free dd stamp i
+	for i in 1 2 3; do   # the dashboard's own status polling connects briefly, so look three times
+		others="$(mysql_new -N -e "SELECT COUNT(*) FROM performance_schema.processlist WHERE ID <> CONNECTION_ID() AND COMMAND <> 'Daemon' AND USER IS NOT NULL")"
+		if [ "0" = "$others" ]; then break; fi
+		sleep 1
+	done
+	[ "0" = "$others" ] || die "$others other client(s) connected: stop the workflows and sites using MySQL, then run it again"
+	dd="${MYSQL_DATADIR:-$(mysql_datadir)}"; dd="${dd%/}"
+	data="$(mysql_new -N -e "SET SESSION information_schema_stats_expiry = 0; SELECT IFNULL(SUM(DATA_LENGTH + INDEX_LENGTH), 0) FROM information_schema.TABLES WHERE TABLE_SCHEMA NOT IN ($SYS)")"
+	need=$(( 2 * data + 2 * 1024 * 1024 * 1024 ))   # the dump plus the new data folder, from live content; the old folder is only renamed
+	free="${COMPACT_FREE_BYTES:-$(df -k "$dd" | awk 'NR == 2 { print $4 * 1024 }')}"
+	[ "$free" -ge "$need" ] || die "needs $need bytes free ($((need / 1048576)) MB: twice the data plus 2 GB) and only $free are"
+	stamp="$(date +%Y%m%d-%H%M%S)"
+	FENCE_PRIOR="$(mysql_new -N -e 'SELECT @@read_only')"
+	state_update '. + {stamp: $stamp, datadir: $dd, old_datadir: ($dd + ".before-compact-" + $stamp), dump: ($root + "/_mysql-compact/" + $stamp + "/all.sql.zst"), pre: $pre, fence_prior: $prior, done: false}' \
+		--arg stamp "$stamp" --arg dd "$dd" --arg root "$BACKUP_ROOT" --argjson pre "$(counts_json)" --argjson prior "$FENCE_PRIOR"
+	mysql_new -e 'SET GLOBAL super_read_only = ON' || die "could not make MySQL read-only; nothing was changed"
+	FENCE=1
+}
+
+step_dump() {
+	local dump tmp err
+	dump="$(state_get dump)"; tmp="$dump.partial"; err="$dump.err"
+	mkdir -p "$(dirname "$dump")"
+	if ! mysqldump_new --all-databases --routines --events --triggers --single-transaction --set-gtid-purged=OFF 2> "$err" | zstd -q -f -o "$tmp"; then
+		die "the dump failed ($(tail -1 "$err")); nothing was changed"
+	fi
+	[ -s "$tmp" ] || die "the dump is empty; nothing was changed"
+	mv "$tmp" "$dump"
+	rm -f "$err"
+	if [ -n "${COMPACT_HOOK_AFTER_DUMP:-}" ]; then bash -c "$COMPACT_HOOK_AFTER_DUMP" || true; fi   # test hook
+}
+
+step_stop() { run_cmd "$MYSQL_STOP_CMD" || true; wait_down || die "MySQL did not stop"; FENCE=0; }
+
+step_move() {
+	local dd old
+	dd="$(state_get datadir)"; old="$(state_get old_datadir)"
+	if server_up; then die "MySQL is running again (started by hand or by brew services?): stop it, or run --rollback; no folder was moved"; fi
+	if [ -d "$old" ] && [ ! -e "$dd" ]; then return 0; fi   # resumed after the rename
+	[ -d "$dd" ] || die "data folder $dd not found"
+	[ ! -e "$old" ] || die "$old already exists"
+	mv "$dd" "$old"
+}
+
+# init_new_datadir : a fresh data folder at the original path. Only ever deletes the NEW folder, and only while the old one
+# is safe next to it.
+init_new_datadir() {
+	local dd old
+	dd="$(state_get datadir)"; old="$(state_get old_datadir)"
+	[ -d "$old" ] || die "the old data folder $old is missing; refusing to initialise over the only copy"
+	if server_up; then die "MySQL is running: stop it before a new data folder is initialised"; fi
+	if [ -e "$dd" ]; then rm -rf "$dd"; fi   # an interrupted run left a partial folder
+	mkdir -p "$LOG_DIR"
+	"$MYSQLD_BIN" --initialize-insecure --datadir="$dd" --log-error="$LOG_DIR/mysql-compact-init.log" \
+		|| die "initialise failed (see $LOG_DIR/mysql-compact-init.log); --rollback puts the old data folder back"
+}
+
+step_init() { init_new_datadir; }
+
+step_start() {
+	run_cmd "$MYSQL_START_CMD" || true
+	wait_up || die "MySQL did not start on the new data folder; --rollback puts the old one back"
+	assert_new_server
+}
+
+step_restore() {
+	local dump
+	dump="$(state_get dump)"
+	assert_new_server
+	if [ "true" = "$(state_get restore_started)" ]; then   # killed mid-restore: the server is half full, start it clean
+		run_cmd "$MYSQL_STOP_CMD" || true
+		wait_down || die "MySQL did not stop"
+		init_new_datadir
+		step_start
+	fi
+	state_update '.restore_started = true'
+	zstd -dc "$dump" | mysql_new || die "restore failed; the old data folder is untouched: --rollback puts it back"
+	mysql_new -e 'FLUSH PRIVILEGES'
+	state_update '.restore_started = false'
+}
+
+step_verify() {
+	local pre post
+	if [ -n "${COMPACT_TAMPER_PRE:-}" ]; then state_update '.pre.tables += 1'; fi   # test hook
+	pre="$(state_json | jq -cS '.pre')"
+	post="$(counts_json | jq -cS .)"
+	if [ "$pre" != "$post" ]; then
+		log "mysql-compact: counts differ (before $pre, after $post): rolling back"
+		rollback_main || true
+		exit 1
+	fi
+}
+
+rollback_main() {
+	local dd old
+	[ -f "$STATE_FILE" ] || die "nothing to roll back (no compaction in progress)"
+	dd="$(state_get datadir)"; old="$(state_get old_datadir)"
+	FENCE_PRIOR="$(state_get fence_prior)"; FENCE_PRIOR="${FENCE_PRIOR:-0}"
+	if server_up && [ ! -d "$old" ]; then FENCE=1; release_fence; fi   # nothing was moved: MySQL keeps running, so lift the fence
+	run_cmd "$MYSQL_STOP_CMD" || true
+	wait_down || die "MySQL did not stop"
+	if [ -d "$old" ]; then   # the move happened: the folder at the original path is the new one
+		if [ -e "$dd" ]; then rm -rf "$dd"; fi
+		mv "$old" "$dd"
+	fi
+	run_cmd "$MYSQL_START_CMD" || true
+	wait_up || die "MySQL did not start again on the original data folder"
+	rm -f "$STATE_FILE"
+	log "mysql-compact: rolled back; the original data folder is in place"
+}
+
+finish_main() {
+	local old kb
+	[ -f "$STATE_FILE" ] || die "nothing to finish (no compaction in progress)"
+	[ "verify" = "$(state_get step)" ] || die "finish only after the verify step (the step is '$(state_get step)')"
+	[ "true" != "$(state_get done)" ] || die "already finished"
+	old="$(state_get old_datadir)"
+	kb="$(du -sk "$old" 2> /dev/null | cut -f1 || true)"
+	rm -rf "$old"
+	state_update '.done = true'
+	log "mysql-compact: deleted the old data folder (${kb:-0} KB); the space is back"
+}
+
+run_main() {
+	local s last found=1
+	if [ -f "$STATE_FILE" ] && [ "true" = "$(state_get done)" ]; then rm -f "$STATE_FILE"; fi   # a finished run: start a new one
+	last="$(state_get step)"
+	case "$last" in
+		(preflight|dump)   # MySQL was never stopped, so it has taken writes since: the earlier dump is stale
+			log "mysql-compact: an earlier run stopped before MySQL was stopped; its dump is stale, starting over"
+			case "$(state_get dump)" in (*/_mysql-compact/*/all.sql.zst) rm -rf "$(dirname "$(state_get dump)")" ;; esac
+			state_update '.step = null'
+			last="" ;;
+	esac
+	if [ -z "$last" ]; then found=0; fi
+	for s in $STEPS; do
+		if [ "1" = "$found" ]; then   # still skipping the steps up to and including the last completed one
+			if [ "$s" = "$last" ]; then found=0; fi
+			continue
+		fi
+		log "mysql-compact: $s"
+		"step_$s"
+		state_update '.step = $s' --arg s "$s"
+		if [ "$s" = "$STOP_AFTER" ]; then break; fi
+	done
+}
+
+# acquire_lock : one mysql-compact at a time (the dashboard's Start button and a terminal must not run it twice). The lock
+# is a pid file, created atomically; one left by a dead process is taken over.
+LOCK_FILE="$DATA_DIR/mysql-compact.lock"
+acquire_lock() {
+	local pid
+	mkdir -p "$DATA_DIR"
+	if ! ( set -o noclobber; echo "$$" > "$LOCK_FILE" ) 2> /dev/null; then
+		pid="$(cat "$LOCK_FILE" 2> /dev/null || true)"
+		if [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then die "another mysql-compact is already running (pid $pid)"; fi
+		rm -f "$LOCK_FILE"
+		echo "$$" > "$LOCK_FILE"
+	fi
+	trap 'release_fence; rm -f "$LOCK_FILE"' EXIT
+}
+
+if [ "status" = "$ACTION" ]; then
+	if [ "1" = "$JSON" ]; then state_json | jq -c .; else state_json | jq -r 'if .step == null then "no compaction in progress" else "step: \(.step)\(if .done then " (done)" else "" end)" end'; fi
+	exit 0
+fi
+
+acquire_lock
+case "$ACTION" in
+	rollback) rollback_main; exit 0 ;;
+	finish) finish_main; exit 0 ;;
+esac
+
+run_main
+if [ "1" = "$JSON" ]; then state_json | jq -c .; else state_json | jq -r '"step: \(.step); old data folder kept at \(.old_datadir) until --finish"'; fi

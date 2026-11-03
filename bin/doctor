@@ -65,6 +65,25 @@ n_max="$(cat "$BREW_PREFIX"/var/log/php-fpm.log "$VALET_HOME"/Log/php-fpm.log 2>
 if "$BREW_PREFIX/opt/mysql@8.4/bin/mysqladmin" -uroot ping > /dev/null 2>&1; then
 	add ok "mysql" "answers on 3306 as root"
 	lb="$(mysql_new -N -e 'SELECT @@log_bin' 2> /dev/null || true)"; [ "0" = "$lb" ] && add ok "mysql binlog" "off" || add warn "mysql binlog" "binary logging on (burns disk and writes locally)" "./bootstrap.sh (installs mysql/zz-devstack.cnf)"
+	# Bytes written to InnoDB data files since MySQL started (performance_schema, on by default), by kind, plus the
+	# busiest <schema>/<table>.ibd. macOS files a "disk writes" report at ~25 KB/s sustained; this says where it went.
+	# A test suite (every test rolls back; TRUNCATE and DROP churn the dictionary) is mostly undo and dictionary writes
+	# spread over many tables: informational. One table taking over 256 KB/s (21 GB a day) on its own is a loop in a
+	# site: warning. Imports under 2 GB and the first hour are not judged.
+	w="$(mysql_new -N -e "SELECT t.f, t.b, u.v, a.undo_b, a.dict_b, a.tbl_b FROM (SELECT REPLACE(FILE_NAME, @@datadir, '') f, SUM_NUMBER_OF_BYTES_WRITE b FROM performance_schema.file_summary_by_instance WHERE EVENT_NAME = 'wait/io/file/innodb/innodb_data_file' AND FILE_NAME LIKE '%.ibd' AND REPLACE(FILE_NAME, @@datadir, '') LIKE '%/%' ORDER BY b DESC LIMIT 1) t, (SELECT VARIABLE_VALUE v FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Uptime') u, (SELECT SUM(IF(FILE_NAME LIKE '%/undo\_%', SUM_NUMBER_OF_BYTES_WRITE, 0)) undo_b, SUM(IF(FILE_NAME LIKE '%/mysql.ibd', SUM_NUMBER_OF_BYTES_WRITE, 0)) dict_b, SUM(IF(FILE_NAME LIKE '%.ibd' AND FILE_NAME NOT LIKE '%/mysql.ibd', SUM_NUMBER_OF_BYTES_WRITE, 0)) tbl_b FROM performance_schema.file_summary_by_instance WHERE EVENT_NAME = 'wait/io/file/innodb/innodb_data_file') a" 2> /dev/null || true)"
+	tf=""; tb=0; tu=0; tundo=0; tdict=0; ttbl=0; IFS=$'\t' read -r tf tb tu tundo tdict ttbl <<<"$w" || true
+	size() { awk -v b="${1:-0}" 'BEGIN { if (b >= 1073741824) printf "%.1f GB", b / 1073741824; else printf "%d MB", b / 1048576 }'; }
+	if [ -n "$tf" ] && [ "${tu:-0}" -ge 3600 ] && [ "${tb:-0}" -ge $((2 * 1024 * 1024 * 1024)) ] && [ $((tb / tu / 1024)) -ge "${MYSQL_WRITE_KBS:-256}" ]; then
+		add warn "mysql writes" "$tf took $(size "$tb") of writes in the $((tu / 3600)) h since MySQL started ($((tb / tu / 1024)) KB/s average): something keeps rewriting it" "database '${tf%%/*}' belongs to one site; find the plugin or cron job rewriting ${tf#*/} (devstack wp <site> cron event list; devstack logs mysql)"
+	elif [ -n "$tf" ]; then
+		up="$((tu / 3600)) h"; [ "$tu" -ge 3600 ] || up="$((tu / 60)) min"
+		note=""; [ $((tundo + tdict)) -gt "$ttbl" ] && [ "$((tundo + tdict + ttbl))" -ge $((2 * 1024 * 1024 * 1024)) ] && note=" (undo and dictionary dominate: rolled-back transactions and DDL, typical of a test suite)"
+		add ok "mysql writes" "in the $up since MySQL started: undo $(size "$tundo"), dictionary $(size "$tdict"), tables $(size "$ttbl"); busiest table file $tf $(size "$tb")$note"
+	fi
+	# Databases no site owns (devstack cleanup): informational. Whether the sweep is on, and how much it would drop now.
+	if cl="$("$REPO_DIR/bin/cleanup" --json 2> /dev/null)" && [ -n "$(jq -r '.mysql // empty' <<<"$cl" 2> /dev/null)" ]; then
+		add ok "cleanup" "$(jq -r '"sweep \(if .sweep.enabled then "on" else "off" end); \(.mysql.unowned) databases no site owns in \(.runs | length) runs; \(.sweep.next | length) runs idle over \(.sweep.older_than_hours) h and sweepable now"' <<<"$cl")"
+	fi
 else add fail "mysql" "not answering" "devstack service mysql@8.4 start; devstack logs mysql" "$(auto_svc mysql@8.4)"; fi
 if curl -s -m 2 http://localhost:8025/api/v1/info > /dev/null; then add ok "mailpit" "UI on 8025"; else add warn "mailpit" "no answer on 8025 (sites' mail is lost)" "devstack service mailpit start" "$(auto_svc mailpit)"; fi
 if "$BREW_PREFIX/bin/redis-cli" -h 127.0.0.1 ping 2> /dev/null | grep -q PONG; then add ok "redis" "PONG on 127.0.0.1:6379"; else add warn "redis" "no PONG" "devstack service redis start" "$(auto_svc redis)"; fi
@@ -86,8 +105,18 @@ sudo -n -l "$VALET_BIN" > /dev/null 2>&1 && add ok "sudoers" "valet + brew trust
 [ "$(readlink "$BREW_PREFIX/bin/devstack" 2> /dev/null)" = "$REPO_DIR/bin/devstack" ] && add ok "devstack link" "$BREW_PREFIX/bin/devstack -> this repo" || add warn "devstack link" "points elsewhere or missing" "./bootstrap.sh" "$(auto_boot)"
 if [ "$(readlink "$DATA_DIR/bin/wp" 2> /dev/null)" != "$REPO_DIR/shims/wp" ]; then add warn "wp shim" "$DATA_DIR/bin/wp missing (wp runs the default PHP in every site)" "./bootstrap.sh" "$(auto_boot)"
 elif ! grep -qF '.local/share/devstack/bin' "$HOME/.zshrc" 2> /dev/null; then add warn "wp shim" "not on PATH in ~/.zshrc" "./bootstrap.sh, then open a new terminal" "$(auto_boot)"
+elif ! grep -qF '.local/share/devstack/bin' "$HOME/.zshenv" 2> /dev/null; then add warn "wp shim" "not on PATH in ~/.zshenv, so wp is missing from ssh commands, IDE tasks and agent shells" "./bootstrap.sh" "$(auto_boot)"
 else add ok "wp shim" "wp follows each site's PHP"; fi
-for a in logs-prune upgrade watchdog; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh" "$(auto_boot)"; done
+# Bare mysql, php, composer… (shims/links) linked next to the wp shim, for shells whose PATH holds no Homebrew.
+miss=""
+while read -r tn trel; do
+	case "$tn" in (""|\#*) continue ;; esac
+	[ -x "$BREW_PREFIX/$trel" ] || continue
+	[ "$(readlink "$DATA_DIR/bin/$tn" 2> /dev/null)" = "$BREW_PREFIX/$trel" ] || miss="$miss $tn"
+done < "$REPO_DIR/shims/links"
+if [ -n "$miss" ]; then add warn "tool links" "not linked in $DATA_DIR/bin:$miss (bare mysql, php, composer fail where PATH holds no Homebrew)" "./bootstrap.sh" "$(auto_boot)"
+else add ok "tool links" "mysql, php, composer… linked in $DATA_DIR/bin"; fi
+for a in logs-prune upgrade watchdog cleanup; do launchctl print "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 && add ok "agent $a" "loaded" || add warn "agent $a" "LaunchAgent not loaded" "./bootstrap.sh" "$(auto_boot)"; done
 free_gb="$(df -g "$HOME" | awk 'NR==2{print $4}')"
 # Valet runs php-fpm, nginx and dnsmasq as root, and brew services then makes their bin/ root-owned; brew cleanup
 # cannot delete those old builds after an upgrade without sudo.

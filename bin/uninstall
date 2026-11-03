@@ -12,7 +12,7 @@ for arg in "$@"; do case "$arg" in --yes) YES=1 ;; --purge) PURGE=1 ;; *) die "u
 log "menu-bar app"; "$REPO_DIR/bin/app" uninstall 2> /dev/null || true
 log "share tunnel"; "$REPO_DIR/bin/site-share" --stop > /dev/null 2>&1 || true
 log "LaunchAgents"
-for a in logs-prune upgrade watchdog; do
+for a in logs-prune upgrade watchdog cleanup; do
 	launchctl bootout "gui/$(id -u)/com.devstack.$a" > /dev/null 2>&1 || true
 	rm -f "$HOME/Library/LaunchAgents/com.devstack.$a.plist"
 done
@@ -22,6 +22,7 @@ log "data services"
 for s in mysql@8.4 mailpit redis memcached; do "$BREW_PREFIX/bin/brew" services stop "$s" > /dev/null 2>&1 || true; done
 log "devstack command"
 rm -f "$BREW_PREFIX/bin/devstack" "$BREW_PREFIX/share/zsh/site-functions/_devstack" "$DATA_DIR/bin/wp"
+while read -r name rel; do case "$name" in (""|\#*) continue ;; esac; rm -f "$DATA_DIR/bin/$name"; done < "$REPO_DIR/shims/links"
 if [ "1" = "$PURGE" ]; then rm -rf "$DATA_DIR"; log "removed $DATA_DIR"; fi
 cat <<MSG
 

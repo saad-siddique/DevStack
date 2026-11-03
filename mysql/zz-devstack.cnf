@@ -5,4 +5,8 @@
 disable_log_bin
 innodb_flush_log_at_trx_commit = 2
 innodb_buffer_pool_size = 512M
+# Default 100M makes the page cleaner flush the same hot pages every ~100 MB of redo. 2G lets them coalesce: measured on
+# big-value upserts (128 KB LONGTEXT, 6000 of them, autocommit and rolled back) total bytes written fell 17%, table, undo
+# and doublewrite files by about 60%. Redo itself (~75% of the bytes) is the floor. Costs 2 GB of disk.
+innodb_redo_log_capacity = 2G
 max_allowed_packet = 256M

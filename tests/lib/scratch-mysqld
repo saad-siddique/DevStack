@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Homebrew's mysqld pinned to a throwaway configuration: no option files, port 33999, no X plugin, no binary log.
+# tests/lib/scratch-mysql.sh points MYSQLD_BIN here; bin/mysql-compact calls it to initialise and the tests to start.
+B="${BREW_PREFIX:-/opt/homebrew}/opt/mysql@8.4"
+exec "$B/bin/mysqld" --no-defaults --basedir="$B" --socket="$MYSQL_SOCK" --mysqlx=OFF --port=33999 --bind-address=127.0.0.1 \
+	--innodb-flush-log-at-trx-commit=2 --skip-log-bin "$@"
