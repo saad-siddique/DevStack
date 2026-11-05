@@ -709,8 +709,10 @@ docs/                 migrating-from-mamp.md, screenshots (docs/img); docs/priva
   fixed chunk first.
 - Xdebug from `shivammathur/extensions` ships as `conf.d/20-xdebug.ini`; off = renamed to `.off`. Bootstrap turns it off
   the first time it sees it, then `bin/php-xdebug` owns the state.
-- Homebrew's newest PHP is the `php` formula, only *aliased* `php@8.5` (no `opt/php@8.5`, service name `php`). `php_bin`
-  in `bin/lib.sh` and `bin/service` map the alias; the Brewfile pins `link: false` so it never steals the `php` symlink.
+- Homebrew's newest PHP is the `php` formula, only *aliased* `php@8.5` (service name `php`). Current Homebrew still
+  links `opt/php@8.5`, but into `Cellar/php/`, so "is there an `opt/php@X.Y`" does not tell the formula: `php_formula`
+  in `bin/lib.sh` resolves the link, and every script that needs the formula or service name uses it. `php_bin` maps
+  the binary; the Brewfile pins `link: false` so it never steals the `php` symlink.
 - Valet 4.12.0 knows PHP versions up to 8.5. Bootstrap appends newer tap builds (8.6) to its `SUPPORTED_PHP_VERSIONS`
   so `valet isolate php@8.6` works; re-applied after every `composer global update`.
 - The Redis *cask* cannot be managed by `brew services`; use the `redis` formula. A `redis.conf` with `daemonize yes`

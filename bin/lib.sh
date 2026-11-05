@@ -96,9 +96,18 @@ is_protected() { awk -F'\t' -v h="$1" '$0 !~ /^#/ && $1 == h && $5 == "yes" { f=
 # site_php <path> : the PHP formula a linked site runs on (.valetrc written by site_finalize, else the default).
 site_php() { local p; p="$(sed -n 's/^php=//p' "$1/.valetrc" 2> /dev/null | head -1)"; printf '%s' "${p:-$DEFAULT_PHP}"; }
 
+# php_formula php@8.5 -> php : the Homebrew formula (and brew services name) behind php@X.Y. The newest PHP is the
+# `php` formula; Homebrew still links opt/php@X.Y for that alias, but into Cellar/php/, so a bare -d test is not enough.
+php_formula() {
+	case "$(readlink "$BREW_PREFIX/opt/$1" 2> /dev/null || true)" in
+		*/Cellar/php/*) echo php ;;
+		*) if [ -d "$BREW_PREFIX/opt/$1" ]; then echo "$1"; else echo php; fi ;;
+	esac
+}
+
 # php_bin php@7.4 -> /opt/homebrew/opt/php@7.4/bin/php
 php_bin() {
-	# Homebrew's current `php` formula carries the newest version and is only *aliased* php@X.Y (no opt/php@X.Y link).
+	# Homebrew's current `php` formula carries the newest version and is only *aliased* php@X.Y (see php_formula).
 	if [ -x "$BREW_PREFIX/opt/$1/bin/php" ]; then printf '%s/opt/%s/bin/php\n' "$BREW_PREFIX" "$1"; return; fi
 	if [ -x "$BREW_PREFIX/opt/php/bin/php" ] && [ "php@$("$BREW_PREFIX/opt/php/bin/php" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')" = "$1" ]; then printf '%s/opt/php/bin/php\n' "$BREW_PREFIX"; return; fi
 	printf '%s/opt/%s/bin/php\n' "$BREW_PREFIX" "$1"

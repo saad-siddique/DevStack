@@ -21,7 +21,7 @@ printf '%s\n' "${ALLOWED[@]}" | /usr/bin/grep -qx -- "$NAME" || die "unknown ser
 is_root_domain() { case "$1" in nginx|dnsmasq|php@*|php) return 0 ;; *) return 1 ;; esac; }
 # Homebrew's newest PHP is the `php` formula, only aliased php@X.Y; brew services knows it as "php".
 FORMULA="$NAME"
-case "$NAME" in php@*) [ -d "$BREW_PREFIX/opt/$NAME" ] || FORMULA="php" ;; esac
+case "$NAME" in php@*) FORMULA="$(php_formula "$NAME")" ;; esac
 brew_services() {
 	if is_root_domain "$NAME"; then sudo -n "$BREW_PREFIX/bin/brew" services "$@"; else "$BREW_PREFIX/bin/brew" services "$@"; fi
 }
