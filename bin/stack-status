@@ -13,7 +13,7 @@ n_isolated_total="$(/usr/bin/grep -lE 'valet[0-9]+\.sock' "$VALET_HOME"/Nginx/* 
 php_json="$(for d in "$BREW_PREFIX"/etc/php/*/; do
 	[ -d "$d/conf.d" ] || continue
 	v="$(basename "$d")"; sock="valet${v/./}.sock"
-	formula="php@$v"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"
+	formula="$(php_formula "php@$v")"
 	# Startup warnings go to stdout, so the version is the last line; broken_ext names what failed to load.
 	full="$("$BREW_PREFIX/opt/$formula/bin/php" -r 'echo "\n", PHP_VERSION;' 2> /dev/null | tail -1 || true)"
 	broken="$(php_broken_ext "$BREW_PREFIX/opt/$formula/bin/php" | paste -sd, -)"

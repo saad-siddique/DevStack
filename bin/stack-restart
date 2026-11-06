@@ -23,7 +23,7 @@ plan="$(
 	for s in redis memcached mailpit; do loaded "$s" && echo "$s optional"; done
 	for d in "$BREW_PREFIX"/etc/php/*/; do
 		[ -d "$d/conf.d" ] || continue
-		v="$(basename "$d")"; formula="php@$v"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"
+		v="$(basename "$d")"; formula="$(php_formula "php@$v")"
 		if /usr/bin/grep -qx -- "$v" <<<"$in_use"; then echo "php@$v required"; elif loaded "$formula"; then echo "php@$v optional"; fi
 	done
 	echo "nginx required"

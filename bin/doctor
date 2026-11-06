@@ -42,7 +42,7 @@ default_sock="$(readlink "$VALET_HOME/valet.sock" 2> /dev/null || true)"
 # (readlink already tolerant)
 [ -n "$default_sock" ] && add ok "default php" "valet.sock -> $(basename "$default_sock")" || add fail "default php" "no ~/.config/valet/valet.sock" "valet use ${DEFAULT_PHP} --force"
 for d in "$BREW_PREFIX"/etc/php/*/; do
-	v="$(basename "$d")"; formula="php@$v"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"
+	v="$(basename "$d")"; formula="$(php_formula "php@$v")"
 	used="$(/usr/bin/grep -l "valet${v/./}.sock" "$VALET_HOME"/Nginx/* 2> /dev/null | wc -l | tr -d ' ' || true)"
 	[ "valet${v/./}.sock" = "$(basename "$default_sock")" ] && used="default"
 	st="$(svc_status "$formula")"

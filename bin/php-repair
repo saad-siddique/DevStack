@@ -13,7 +13,7 @@ bin="$(php_bin "php@$V")"
 broken="$(php_broken_ext "$bin" | paste -sd' ' -)"
 if [ -z "$broken" ]; then log "php@$V: every extension loads"; exit 0; fi
 
-formula="php@$V"; [ -d "$BREW_PREFIX/opt/$formula" ] || formula="php"   # the newest PHP is Homebrew's `php`
+formula="$(php_formula "php@$V")"   # the newest PHP is Homebrew's `php`
 exts=(); while IFS= read -r f; do exts+=("$f"); done < <("$BREW_PREFIX/bin/brew" list --formula --full-name | grep -E "/[^/]+@$V\$" | grep -v "/php@$V\$" || true)
 log "php@$V: $broken fail to load; reinstalling $formula ${exts[*]+${exts[*]}}"
 HOMEBREW_NO_AUTO_UPDATE=1 "$BREW_PREFIX/bin/brew" reinstall "$formula" ${exts[@]+"${exts[@]}"} < /dev/null > /dev/null 2> >(grep -E '^Error' >&2) || true
